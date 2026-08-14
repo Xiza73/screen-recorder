@@ -13,12 +13,11 @@ para grabar demos y tutoriales sin fricción.
 **Principio rector: todo local.** Sin cuentas, sin nube, sin telemetría. Las
 grabaciones **nunca** salen de la máquina del usuario.
 
-Solo se permiten **dos** conexiones salientes, ambas explícitas y verificadas:
+Se permite **una sola** conexión saliente: el auto-update (Tauri updater,
+firmado). Cualquier otra es un bug o una feature fuera de alcance.
 
-1. El auto-update (Tauri updater, firmado).
-2. La descarga de ffmpeg en el primer arranque (HTTPS + hash verificado).
-
-Cualquier tercera conexión saliente es un bug o una feature fuera de alcance.
+La app **no descarga binarios**. ffmpeg lo instala el usuario con el gestor de
+paquetes de su sistema; nosotros lo detectamos.
 
 ## Usuarios y alcance (MVP)
 
@@ -53,7 +52,7 @@ transcodificación a formatos exóticos, versión móvil.
 | Package manager | **bun** (nunca npm/yarn/pnpm) |
 | Captura de pantalla | Rust nativo (`scap` / ScreenCaptureKit / WGC) |
 | Captura de audio | Rust nativo (`cpal` + loopback por plataforma) |
-| Encoding | `ffmpeg` descargado en el primer arranque (**no** es un sidecar de Tauri) |
+| Encoding | `ffmpeg` **instalado por el usuario**, detectado en el `PATH` |
 | Testing TS | Vitest |
 | Testing Rust | `cargo test` |
 | Lint/format TS | Biome |
@@ -172,35 +171,30 @@ screen-recorder/
 
 ## Integraciones externas
 
-Son dos. Ni una más.
-
-### 1. Auto-update (plugin `updater` de Tauri)
+Una sola: **auto-update** vía el plugin `updater` de Tauri.
 
 - Endpoint de releases: GitHub Releases.
 - Los bundles se firman con clave privada. **La clave nunca entra al repo** — vive
   en el keychain local y en GitHub Secrets (`TAURI_SIGNING_PRIVATE_KEY`).
 - La pubkey sí va commiteada en `tauri.conf.json`. Es lo que verifica el update.
 
-### 2. Descarga de ffmpeg en el primer arranque
+## ffmpeg — dependencia del sistema, no integración
+
+ffmpeg **lo instala el usuario**. La app no lo descarga, no lo empaqueta y no lo
+actualiza. Solo lo detecta y, si falta, muestra el comando de instalación.
 
 **No es un sidecar de Tauri.** Los sidecars se declaran en `bundle.externalBin` y
-se empaquetan en build time con sufijo de target-triple. Un binario descargado en
-runtime no pasa por ese mecanismo: se spawnea desde Rust apuntando a la ruta donde
-se bajó. No busques `Command::new_sidecar()` — no aplica acá.
+se empaquetan en build time. Acá el binario es del sistema:
+`Command::new_sidecar()` no aplica.
 
-Reglas duras:
+Reglas duras (implementadas en `src-tauri/src/encode/`):
 
 | Regla | Por qué |
 |---|---|
-| URL **HTTPS** y fijada en el código, una por plataforma | Sin TLS, cualquiera en la red te sustituye el binario |
-| **SHA-256 verificado** contra un hash commiteado en el repo | Descargar y ejecutar sin verificar es ejecución de código arbitrario. **No es opcional** |
-| El hash **no** se descarga del mismo servidor que el binario | Si quien sirve el binario sirve el hash, la verificación no verifica nada |
-| Se guarda en el **app data dir**, nunca en una ruta del sistema | No requiere permisos de admin y queda aislado por usuario |
-| Fallo de descarga → error **explícito** en la UI | Nada de estado roto silencioso. El usuario tiene que saber por qué no puede grabar |
-| Los argumentos se pasan como **array**, nunca interpolados | Ver el skill `security-review`, sección 1 |
-
-El detalle completo de la superficie de ataque está en
-`.claude/skills/security-review/SKILL.md`. Leelo antes de tocar este código.
+| Resolvemos la ruta absoluta recorriendo `PATH` nosotros | En Windows, `CreateProcess` busca en el directorio actual **antes** que en `PATH`: un `ffmpeg.exe` plantado ahí se ejecutaría primero |
+| Se valida con `ffmpeg -version` antes de confiar | Que exista un archivo llamado `ffmpeg` no prueba que lo sea |
+| Los argumentos se pasan como **array**, nunca interpolados | Ver skill `security-review` § 1b |
+| Si falta → error **explícito** en la UI con el comando de instalación | Nada de estado roto silencioso donde el botón de grabar no hace nada |
 
 ---
 

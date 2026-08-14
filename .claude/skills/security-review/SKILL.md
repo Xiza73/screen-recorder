@@ -1,6 +1,6 @@
 ---
 name: security-review
-description: Auditoría de seguridad para la app Tauri v2 — descarga y verificación del binario de ffmpeg, inyección de argumentos al ejecutarlo, capabilities y permisos, validación en la frontera IPC, path traversal al guardar grabaciones, firma del updater y privacidad de la captura. Usar al tocar src-tauri/, capabilities/, tauri.conf.json, el encoder, el updater, o antes de cualquier release.
+description: Auditoría de seguridad para la app Tauri v2 — resolución del binario de ffmpeg en el PATH y secuestro de PATH, inyección de argumentos al ejecutarlo, capabilities y permisos, validación en la frontera IPC, path traversal al guardar grabaciones, firma del updater y privacidad de la captura. Usar al tocar src-tauri/, capabilities/, tauri.conf.json, el encoder, el updater, o antes de cualquier release.
 ---
 
 # Security review — screen-recorder (Tauri v2)
@@ -11,34 +11,35 @@ binario externo (ffmpeg)**. Cada una es una frontera de confianza real.
 
 Revisá en este orden. La superficie más peligrosa primero.
 
-## 1a. ffmpeg — cómo llega el binario a la máquina
+## 1a. ffmpeg — qué binario terminamos ejecutando
 
-Este proyecto **descarga ffmpeg en el primer arranque** y después lo ejecuta.
-Descargar un ejecutable y correrlo es, sin vueltas, un canal de ejecución de
-código. Todo lo de abajo es obligatorio, no "buenas prácticas".
+La app **no descarga ni empaqueta** ffmpeg: lo instala el usuario y nosotros lo
+buscamos en el `PATH`. Eso elimina toda la superficie de descarga (MITM, hashes,
+extracción), pero abre otra: **secuestro del `PATH`**.
 
-- ✅ URL **HTTPS**, fijada en el código, una por plataforma. Nunca construida a
-  partir de input del usuario ni de una config editable.
-- ✅ **SHA-256 del binario verificado antes del primer `exec`.** El hash esperado
-  va **commiteado en el repo**, no descargado.
-- ❌ Traer el hash del mismo servidor que sirve el binario. Si quien controla uno
-  controla el otro, la verificación no verifica nada. Es teatro.
-- ✅ Descargar a un archivo temporal, verificar, y **recién ahí** moverlo a su
-  ubicación final. Un binario a medio bajar no debe poder ejecutarse nunca.
-- ✅ Guardar en el **app data dir** del usuario (`app.path().app_data_dir()`).
-  Nunca en `Program Files`, `/usr/local/bin` ni ninguna ruta compartida: eso pide
-  permisos de admin y expone el binario a otros usuarios de la máquina.
-- ✅ En Unix, poner el bit de ejecución **después** de verificar, nunca antes.
-- ✅ Re-verificar el hash al arrancar, no solo al descargar. Protege contra
-  manipulación en reposo y cuesta ~200 ms sobre un archivo de 70 MB.
-- ✅ Si la descarga o la verificación fallan: **error explícito en la UI**.
-  Un estado roto silencioso donde el botón de grabar no hace nada es peor que un
+- ❌ `Command::new("ffmpeg")` dejando que el SO resuelva el nombre.
+  En Windows, `CreateProcess` busca en el **directorio de la aplicación y en el
+  directorio actual antes que en `PATH`**. Un `ffmpeg.exe` dejado en cualquiera
+  de esos dos lugares se ejecuta antes que el real.
+- ✅ Recorrer las entradas de `PATH` nosotros, quedarnos con la primera que sea
+  un **archivo regular** (no un directorio homónimo) y spawnear la **ruta
+  absoluta**.
+- ✅ Validar con `ffmpeg -version` y confirmar que la salida empieza con
+  `ffmpeg version`. Que exista un archivo llamado `ffmpeg` no prueba que lo sea.
+- ❌ Que el usuario o la config puedan indicar una ruta arbitraria sin que eso se
+  trate como frontera de confianza. Si algún día se agrega un "ffmpeg
+  personalizado" en preferencias, ese campo es input hostil: validar que exista,
+  que sea archivo, y pasar por el mismo `probe`.
+- ✅ Si falta: **error explícito en la UI** con el comando de instalación. Un
+  estado roto silencioso donde el botón de grabar no hace nada es peor que un
   mensaje de error.
-- ❌ Reintentar en loop sin límite, o caer a HTTP si HTTPS falla. Jamás.
 
-Señal de alarma en review: cualquier `exec`, `Command::new` o seteo del bit de
-ejecución que no tenga una verificación de hash **antes** en el mismo camino de
-código.
+Límite honesto de esta postura: si el atacante ya puede escribir en el `PATH` del
+usuario, tiene ejecución de código por vías mucho más directas que la nuestra.
+No pretendemos resolver eso — solo no ser el camino **más fácil**.
+
+Señal de alarma en review: cualquier `Command::new` cuyo primer argumento sea un
+nombre suelto en vez de una ruta absoluta resuelta y validada.
 
 ## 1b. ffmpeg — inyección de argumentos al ejecutarlo
 
