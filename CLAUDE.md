@@ -11,8 +11,14 @@ pesadas, caras y con cuenta obligatoria. Queremos una app liviana, local y rápi
 para grabar demos y tutoriales sin fricción.
 
 **Principio rector: todo local.** Sin cuentas, sin nube, sin telemetría. Las
-grabaciones nunca salen de la máquina del usuario. La única conexión saliente
-permitida es el auto-update.
+grabaciones **nunca** salen de la máquina del usuario.
+
+Solo se permiten **dos** conexiones salientes, ambas explícitas y verificadas:
+
+1. El auto-update (Tauri updater, firmado).
+2. La descarga de ffmpeg en el primer arranque (HTTPS + hash verificado).
+
+Cualquier tercera conexión saliente es un bug o una feature fuera de alcance.
 
 ## Usuarios y alcance (MVP)
 
@@ -47,7 +53,7 @@ transcodificación a formatos exóticos, versión móvil.
 | Package manager | **bun** (nunca npm/yarn/pnpm) |
 | Captura de pantalla | Rust nativo (`scap` / ScreenCaptureKit / WGC) |
 | Captura de audio | Rust nativo (`cpal` + loopback por plataforma) |
-| Encoding | `ffmpeg` como **sidecar** de Tauri |
+| Encoding | `ffmpeg` descargado en el primer arranque (**no** es un sidecar de Tauri) |
 | Testing TS | Vitest |
 | Testing Rust | `cargo test` |
 | Lint/format TS | Biome |
@@ -166,12 +172,37 @@ screen-recorder/
 
 ## Integraciones externas
 
-Solo una: **auto-update** vía el plugin `updater` de Tauri.
+Son dos. Ni una más.
+
+### 1. Auto-update (plugin `updater` de Tauri)
 
 - Endpoint de releases: GitHub Releases.
 - Los bundles se firman con clave privada. **La clave nunca entra al repo** — vive
   en el keychain local y en GitHub Secrets (`TAURI_SIGNING_PRIVATE_KEY`).
 - La pubkey sí va commiteada en `tauri.conf.json`. Es lo que verifica el update.
+
+### 2. Descarga de ffmpeg en el primer arranque
+
+**No es un sidecar de Tauri.** Los sidecars se declaran en `bundle.externalBin` y
+se empaquetan en build time con sufijo de target-triple. Un binario descargado en
+runtime no pasa por ese mecanismo: se spawnea desde Rust apuntando a la ruta donde
+se bajó. No busques `Command::new_sidecar()` — no aplica acá.
+
+Reglas duras:
+
+| Regla | Por qué |
+|---|---|
+| URL **HTTPS** y fijada en el código, una por plataforma | Sin TLS, cualquiera en la red te sustituye el binario |
+| **SHA-256 verificado** contra un hash commiteado en el repo | Descargar y ejecutar sin verificar es ejecución de código arbitrario. **No es opcional** |
+| El hash **no** se descarga del mismo servidor que el binario | Si quien sirve el binario sirve el hash, la verificación no verifica nada |
+| Se guarda en el **app data dir**, nunca en una ruta del sistema | No requiere permisos de admin y queda aislado por usuario |
+| Fallo de descarga → error **explícito** en la UI | Nada de estado roto silencioso. El usuario tiene que saber por qué no puede grabar |
+| Los argumentos se pasan como **array**, nunca interpolados | Ver el skill `security-review`, sección 1 |
+
+El detalle completo de la superficie de ataque está en
+`.claude/skills/security-review/SKILL.md`. Leelo antes de tocar este código.
+
+---
 
 No hay backend, ni base de datos, ni auth, ni pagos, ni telemetría. Si una tarea
 parece necesitar uno, **frená y preguntá** — probablemente esté fuera de alcance.

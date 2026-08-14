@@ -1,6 +1,6 @@
 ---
 name: security-review
-description: Auditoría de seguridad para la app Tauri v2 — capabilities y permisos, validación en la frontera IPC, path traversal al guardar grabaciones, inyección de argumentos en el sidecar de ffmpeg, firma del updater y privacidad de la captura. Usar al tocar src-tauri/, capabilities/, tauri.conf.json, el sidecar, el updater, o antes de cualquier release.
+description: Auditoría de seguridad para la app Tauri v2 — descarga y verificación del binario de ffmpeg, inyección de argumentos al ejecutarlo, capabilities y permisos, validación en la frontera IPC, path traversal al guardar grabaciones, firma del updater y privacidad de la captura. Usar al tocar src-tauri/, capabilities/, tauri.conf.json, el encoder, el updater, o antes de cualquier release.
 ---
 
 # Security review — screen-recorder (Tauri v2)
@@ -11,7 +11,36 @@ binario externo (ffmpeg)**. Cada una es una frontera de confianza real.
 
 Revisá en este orden. La superficie más peligrosa primero.
 
-## 1. Sidecar de ffmpeg — inyección de argumentos
+## 1a. ffmpeg — cómo llega el binario a la máquina
+
+Este proyecto **descarga ffmpeg en el primer arranque** y después lo ejecuta.
+Descargar un ejecutable y correrlo es, sin vueltas, un canal de ejecución de
+código. Todo lo de abajo es obligatorio, no "buenas prácticas".
+
+- ✅ URL **HTTPS**, fijada en el código, una por plataforma. Nunca construida a
+  partir de input del usuario ni de una config editable.
+- ✅ **SHA-256 del binario verificado antes del primer `exec`.** El hash esperado
+  va **commiteado en el repo**, no descargado.
+- ❌ Traer el hash del mismo servidor que sirve el binario. Si quien controla uno
+  controla el otro, la verificación no verifica nada. Es teatro.
+- ✅ Descargar a un archivo temporal, verificar, y **recién ahí** moverlo a su
+  ubicación final. Un binario a medio bajar no debe poder ejecutarse nunca.
+- ✅ Guardar en el **app data dir** del usuario (`app.path().app_data_dir()`).
+  Nunca en `Program Files`, `/usr/local/bin` ni ninguna ruta compartida: eso pide
+  permisos de admin y expone el binario a otros usuarios de la máquina.
+- ✅ En Unix, poner el bit de ejecución **después** de verificar, nunca antes.
+- ✅ Re-verificar el hash al arrancar, no solo al descargar. Protege contra
+  manipulación en reposo y cuesta ~200 ms sobre un archivo de 70 MB.
+- ✅ Si la descarga o la verificación fallan: **error explícito en la UI**.
+  Un estado roto silencioso donde el botón de grabar no hace nada es peor que un
+  mensaje de error.
+- ❌ Reintentar en loop sin límite, o caer a HTTP si HTTPS falla. Jamás.
+
+Señal de alarma en review: cualquier `exec`, `Command::new` o seteo del bit de
+ejecución que no tenga una verificación de hash **antes** en el mismo camino de
+código.
+
+## 1b. ffmpeg — inyección de argumentos al ejecutarlo
 
 **El riesgo más concreto del proyecto.** Un nombre de archivo o un preset que
 viene del usuario y termina interpolado en una línea de comando es ejecución
@@ -19,7 +48,9 @@ arbitraria.
 
 - ❌ `Command::new("sh").arg("-c").arg(format!("ffmpeg -i {input} ..."))`
 - ❌ Cualquier `format!` que arme un comando completo como string.
-- ✅ Sidecar de Tauri con args pasados **como array**, un elemento por argumento.
+- ✅ `Command` de Rust con args pasados **como array**, un elemento por argumento.
+  (No es un sidecar de Tauri: el binario se descarga en runtime, así que
+  `Command::new_sidecar()` no aplica. Se spawnea por ruta absoluta.)
 - ✅ Rutas canonicalizadas antes de pasarlas.
 - ✅ Presets de encoding desde un `enum` cerrado en Rust, nunca un string libre
   que viene de TS.
