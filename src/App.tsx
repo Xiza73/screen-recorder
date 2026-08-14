@@ -1,17 +1,25 @@
 import "./App.css";
+import { RegionPicker } from "./features/region-picker/RegionPicker";
 import { formatDuration } from "./lib/format-duration";
 import { DEFAULT_FPS } from "./lib/ipc/recorder";
 import { type FfmpegState, useFfmpegStatus } from "./lib/ipc/use-ffmpeg-status";
 import { type Recorder, useRecorder } from "./lib/ipc/use-recorder";
+import { type RegionSelection, sameRegion, useRegionSelection } from "./lib/ipc/use-region";
 import { closeWindow, minimizeWindow } from "./lib/ipc/window";
 import { useElapsed } from "./lib/use-elapsed";
 
 export default function App() {
   const ffmpeg = useFfmpegStatus();
-  const recorder = useRecorder();
+  const selection = useRegionSelection();
+  const recorder = useRecorder(selection.region);
 
   const recording = recorder.state.status === "recording";
   const elapsed = useElapsed(recording);
+
+  // En modo selección esta misma ventana ES el overlay: no se dibuja el panel.
+  if (selection.picking) {
+    return <RegionPicker bounds={selection.picking} onDone={selection.finishPicking} />;
+  }
 
   return (
     <div className="app">
@@ -57,7 +65,7 @@ export default function App() {
 
       <main className="panel">
         {ffmpeg.status === "ready" ? (
-          <RecorderPanel recorder={recorder} elapsed={elapsed} />
+          <RecorderPanel recorder={recorder} selection={selection} elapsed={elapsed} />
         ) : (
           <FfmpegNotice state={ffmpeg} />
         )}
@@ -66,14 +74,50 @@ export default function App() {
   );
 }
 
-function RecorderPanel({ recorder, elapsed }: { recorder: Recorder; elapsed: number }) {
+function RecorderPanel({
+  recorder,
+  selection,
+  elapsed,
+}: {
+  recorder: Recorder;
+  selection: RegionSelection;
+  elapsed: number;
+}) {
   const { state, start, stop } = recorder;
+  const { monitors, region, custom, pickMonitor, startPicking } = selection;
   const recording = state.status === "recording";
 
   return (
     <>
       <span className="label">$ fuente</span>
-      <div className="preview">[ pantalla completa ]</div>
+      <div className="segmented">
+        {monitors.map((monitor, i) => (
+          <button
+            // Los monitores no tienen id estable; la posición sí los distingue.
+            key={`${monitor.x},${monitor.y}`}
+            type="button"
+            className={!custom && sameRegion(region, monitor) ? "seg seg--on" : "seg"}
+            onClick={() => pickMonitor(monitor)}
+            disabled={recording}
+          >
+            {monitors.length > 1 ? `pantalla ${i + 1}` : "pantalla"}
+          </button>
+        ))}
+        <button
+          type="button"
+          className={custom ? "seg seg--on" : "seg"}
+          onClick={startPicking}
+          disabled={recording}
+        >
+          área
+        </button>
+      </div>
+
+      <div className="preview">
+        {region
+          ? `[ ${region.width}×${region.height} @ ${region.x},${region.y} ]`
+          : "[ escritorio completo ]"}
+      </div>
 
       <div className="badges">
         <span className="badge">mp4</span>

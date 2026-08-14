@@ -22,6 +22,14 @@
   font-display: swap;
 }
 
+/* La ventana es `transparent: true`: WebView2 pinta el canvas de blanco salvo
+   que html y body declaren transparencia explícita — no alcanza con omitir el
+   background. El fondo del panel lo pone `.app`. */
+html,
+body {
+  background: transparent;
+}
+
 :root {
   /* --- superficies, de más profunda a más elevada --- */
   --bg-app: #07090c;

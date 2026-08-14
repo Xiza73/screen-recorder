@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { startRecording, stopRecording } from "./recorder";
+import { DEFAULT_FPS, startRecording, stopRecording } from "./recorder";
+import type { Region } from "./region";
 
 export type RecorderState =
   | { status: "idle" }
@@ -13,12 +14,13 @@ export type Recorder = {
   stop: () => Promise<void>;
 };
 
-export function useRecorder(): Recorder {
+/** `region` en `null` graba el escritorio completo. */
+export function useRecorder(region: Region | null): Recorder {
   const [state, setState] = useState<RecorderState>({ status: "idle" });
 
   async function start() {
     try {
-      const file = await startRecording();
+      const file = await startRecording(DEFAULT_FPS, region);
       setState({ status: "recording", file });
     } catch {
       setState({ status: "error" });

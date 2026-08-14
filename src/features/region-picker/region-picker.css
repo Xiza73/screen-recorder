@@ -1,0 +1,60 @@
+/* En modo selección la ventana cubre el escritorio y es transparente: nada acá
+   puede pintar un fondo opaco. El fondo del panel lo pone `.app`, que en este
+   modo no se renderiza. */
+
+.picker {
+  position: fixed;
+  inset: 0;
+  cursor: crosshair;
+}
+
+/* Antes de arrastrar, el atenuado lo pone el overlay entero. Una vez que hay
+   rectángulo lo pone el box-shadow de .picker__rect, que atenúa todo lo de
+   afuera sin necesidad de cuatro divs recortando los bordes. */
+.picker--idle {
+  background: rgb(7 9 12 / 0.45);
+}
+
+.picker__rect {
+  position: fixed;
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-md);
+  box-shadow: 0 0 0 100vmax rgb(7 9 12 / 0.55);
+  pointer-events: none;
+}
+
+.picker__size {
+  position: fixed;
+  padding: 4px 8px;
+  border-radius: var(--radius-xs);
+  background: rgb(12 15 20 / 0.85);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--accent);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.picker__hint {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 22px 40px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: rgb(12 15 20 / 0.9);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-dimmer);
+  text-align: center;
+  pointer-events: none;
+}
+
+.picker__hint strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--accent);
+}

@@ -4,9 +4,11 @@
   box-sizing: border-box;
 }
 
+/* El fondo va en .app y NO en body: la ventana del selector de región es
+   transparente y comparte este bundle. Un body opaco la volvería un panel gris
+   tapando la pantalla. */
 body {
   margin: 0;
-  background: var(--bg-panel);
   color: var(--text);
   font-family: var(--font-ui);
   font-size: var(--text-md);
@@ -20,6 +22,7 @@ body {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  background: var(--bg-panel);
 }
 
 /* ---------------- barra de título ---------------- */
@@ -103,6 +106,33 @@ body {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--text-faint);
+}
+
+.segmented {
+  display: flex;
+  gap: 6px;
+}
+
+.seg {
+  flex: 1;
+  padding: 8px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-dimmer);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.seg:hover {
+  border-color: var(--accent);
+}
+
+.seg--on {
+  border-color: var(--accent);
+  background: var(--accent-wash);
+  color: var(--accent);
 }
 
 .preview {
