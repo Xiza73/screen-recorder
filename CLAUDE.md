@@ -59,9 +59,11 @@ transcodificación a formatos exóticos, versión móvil.
 bun install                  # instalar dependencias TS
 bun run tauri dev            # dev (Vite + app nativa, hot reload)
 bun run tauri build          # bundle de release
-bun run test                 # tests TS (Vitest)
+bun run test                 # tests TS (Vitest, single run)
+bun run test:watch           # Vitest en watch
+bun run typecheck            # tsc --noEmit
 bun run lint                 # Biome check
-bun run format               # Biome format --write
+bun run format               # Biome check --write
 ```
 
 ```bash
@@ -70,12 +72,9 @@ cargo clippy  --manifest-path src-tauri/Cargo.toml -- -D warnings
 cargo fmt     --manifest-path src-tauri/Cargo.toml
 ```
 
-**Gate obligatorio antes de cada commit:** `bun run lint` + `bun run test` +
-`cargo clippy -- -D warnings` + `cargo test`. Si algo está en rojo, no se
-commitea: se reporta la falla.
-
-> Nota: los scripts de `package.json` todavía no existen. Se crean al scaffoldear
-> la app (ver "Siguientes pasos"). Hasta entonces, estos comandos son el contrato.
+**Gate obligatorio antes de cada commit:** `bun run lint` + `bun run typecheck` +
+`bun run test` + `cargo clippy -- -D warnings` + `cargo test`. Si algo está en
+rojo, no se commitea: se reporta la falla.
 
 ## Convenciones de código
 
@@ -123,28 +122,47 @@ screen-recorder/
 ├── CLAUDE.md                 # este archivo (commiteado)
 ├── CLAUDE.local.md           # overrides personales (gitignored)
 ├── .mcp.json                 # servidores MCP compartidos
+├── biome.json                # lint + format TS
+├── package.json              # scripts: dev, build, test, lint, typecheck
+├── vite.config.ts            # config de Vite Y de Vitest (un solo archivo)
+├── vitest.setup.ts           # matchers de jest-dom
+├── tsconfig.json             # strict + types de vitest/jest-dom
+├── index.html
 ├── .claude/
 │   ├── settings.json         # permisos del equipo (commiteado)
 │   ├── settings.local.json   # permisos personales (gitignored)
 │   ├── commands/             # /revision, /fix-issue, /deploy
 │   ├── skills/               # security-review, deploy
 │   ├── agents/               # code-reviewer, security-auditor
-│   └── hooks/                # format-on-edit
+│   └── hooks/                # format-on-edit.ts
 │
-└── [pendiente de scaffold]
-    ├── src/                  # UI React
-    │   ├── components/       # presentational
-    │   ├── features/         # recorder, region-picker, shortcuts, trim
-    │   ├── lib/ipc/          # ÚNICO lugar que llama invoke()
-    │   └── stores/           # estado (Zustand)
-    └── src-tauri/
-        ├── src/lib.rs        # pub fn run() + invoke_handler
-        ├── src/capture/      # pantalla, región, webcam
-        ├── src/audio/        # mic + loopback de sistema
-        ├── src/encode/       # sidecar ffmpeg
-        ├── capabilities/     # permisos por ventana
-        └── tauri.conf.json
+├── src/                      # UI React
+│   ├── main.tsx              # entry point
+│   ├── App.tsx               # shell de la app
+│   └── App.test.tsx          # smoke test
+│
+└── src-tauri/
+    ├── Cargo.toml            # crate: screen-recorder / lib: screen_recorder_lib
+    ├── tauri.conf.json       # productName, ventana, CSP, bundle
+    ├── capabilities/
+    │   └── default.json      # permisos por ventana (mínimo privilegio)
+    ├── icons/
+    └── src/
+        ├── main.rs           # llama a screen_recorder_lib::run()
+        └── lib.rs            # pub fn run() + invoke_handler
 ```
+
+**Directorios que se crean cuando la fase los necesita** — no antes:
+
+| Ruta | Cuándo |
+|---|---|
+| `src/lib/ipc/` | Fase 1 — **ÚNICO** lugar que llama `invoke()` |
+| `src/features/` | Fase 1+ — recorder, region-picker, shortcuts, trim |
+| `src/components/` | cuando haya un presentational reusable de verdad |
+| `src/stores/` | cuando el estado no entre en un componente (Zustand) |
+| `src-tauri/src/capture/` | Fase 1 — pantalla, región, webcam |
+| `src-tauri/src/audio/` | Fase 1 (mic) / Fase 4 (loopback de sistema) |
+| `src-tauri/src/encode/` | Fase 1 — sidecar ffmpeg |
 
 ## Integraciones externas
 

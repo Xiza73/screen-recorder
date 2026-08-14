@@ -25,7 +25,6 @@ if (!cmd) process.exit(0);
 
 // ponytail: exit 0 pase lo que pase. El formateo es cosmético, no un gate.
 // El gate real es `bun run lint` antes del commit.
-await Bun.spawn(cmd, { stdout: "ignore", stderr: "ignore" })
-  .exited.catch(() => 0);
+await Bun.spawn(cmd, { stdout: "ignore", stderr: "ignore" }).exited.catch(() => 0);
 
 process.exit(0);

@@ -1,0 +1,20 @@
+[package]
+name = "screen-recorder"
+version = "0.1.0"
+description = "Grabador de pantalla de escritorio, multiplataforma y 100% local"
+authors = ["Xiza73"]
+edition = "2021"
+
+[lib]
+# El sufijo `_lib` evita que el nombre de la lib choque con el del binario.
+# Es un problema solo en Windows: https://github.com/rust-lang/cargo/issues/8519
+name = "screen_recorder_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

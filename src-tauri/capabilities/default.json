@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Permisos de la ventana principal. Mínimo privilegio: se agregan de a uno, cuando una feature realmente los necesita.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
