@@ -50,8 +50,8 @@ transcodificación a formatos exóticos, versión móvil.
 | UI | React 19 + TypeScript (strict) |
 | Bundler | Vite |
 | Package manager | **bun** (nunca npm/yarn/pnpm) |
-| Captura de pantalla | Rust nativo (`scap` / ScreenCaptureKit / WGC) |
-| Captura de audio | Rust nativo (`cpal` + loopback por plataforma) |
+| Captura de video | `ffmpeg` — pantalla, región, webcam y micrófono |
+| Audio de sistema | Rust nativo (`cpal` + loopback) — **solo** esto, y recién en Fase 4 |
 | Encoding | `ffmpeg` **instalado por el usuario**, detectado en el `PATH` |
 | Testing TS | Vitest |
 | Testing Rust | `cargo test` |

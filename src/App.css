@@ -36,6 +36,34 @@ body {
   color: color-mix(in oklab, currentColor 55%, #c2410c);
 }
 
+.recording {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  opacity: 1;
+  font-weight: 600;
+}
+
+.dot {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: #dc2626;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot {
+    animation: none;
+  }
+}
+
 .hint {
   display: inline-block;
   margin-top: 0.4rem;
