@@ -18,7 +18,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 use thiserror::Error;
 
 /// Rango de fps admitido. `fps` llega del frontend: es input no confiable.
@@ -63,6 +63,7 @@ pub enum CaptureError {
     PickerFailed,
 }
 
+pub mod output;
 pub mod picker;
 
 /// Región del escritorio virtual a capturar, en píxeles **físicos**.
@@ -225,12 +226,9 @@ pub fn build_args(
     Ok(args)
 }
 
-/// Ruta de salida: carpeta de Videos del usuario + timestamp.
+/// Ruta de salida: carpeta configurada + timestamp.
 pub fn default_output(app: &AppHandle) -> Result<PathBuf, CaptureError> {
-    let dir = app
-        .path()
-        .video_dir()
-        .map_err(|_| CaptureError::OutputDirUnavailable)?;
+    let dir = output::resolve_dir(app)?;
 
     let name = format!(
         "screen-recorder-{}.mp4",

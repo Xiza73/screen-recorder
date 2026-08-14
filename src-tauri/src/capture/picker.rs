@@ -16,9 +16,18 @@
 use std::sync::Mutex;
 
 use serde::Serialize;
-use tauri::{PhysicalPosition, PhysicalSize, Window};
+use tauri::{
+    AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder, Window,
+};
 
-use super::CaptureError;
+use super::{CaptureError, Region};
+
+/// Ventana que dibuja el borde del área a grabar.
+const GUIDE_LABEL: &str = "region-guide";
+
+/// Grosor del borde, en píxeles físicos. La ventana se corre esto hacia afuera
+/// para que el borde NO entre en la grabación.
+const GUIDE_BORDER: i32 = 2;
 
 /// Rectángulo en píxeles físicos.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -180,6 +189,84 @@ fn restore(window: &Window, saved: &tauri::State<'_, PanelGeometry>) -> Result<(
     Ok(())
 }
 
+/// Muestra (o reubica) la guía visual alrededor de `region`.
+///
+/// La ventana no tiene JavaScript: es `guide.html`, que solo pinta un borde.
+/// Es click-through, así que no puede robarle interacción a nada de abajo.
+///
+/// # Por qué es `async`
+///
+/// **Crear una ventana desde un comando síncrono cuelga la app.** Un comando
+/// síncrono corre en el hilo principal; crear una ventana necesita despachar al
+/// event loop, que es ese mismo hilo bloqueado esperando que el comando
+/// termine. Se esperan mutuamente para siempre: el `build()` nunca vuelve, el
+/// hilo principal queda muerto y desde ahí no se procesa ningún comando más.
+///
+/// Marcarlo `async` lo saca del hilo principal y el deadlock desaparece.
+/// No es cosmético: es la diferencia entre que funcione y que la app se congele.
+#[tauri::command]
+pub async fn show_region_guide(app: AppHandle, region: Region) -> Result<(), CaptureError> {
+    let marco = guide_frame(region);
+
+    let window = match app.get_webview_window(GUIDE_LABEL) {
+        Some(existente) => existente,
+        None => WebviewWindowBuilder::new(&app, GUIDE_LABEL, WebviewUrl::App("guide.html".into()))
+            .title("Área de grabación")
+            .decorations(false)
+            .transparent(true)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .resizable(false)
+            .focused(false)
+            .visible(false)
+            .build()
+            .map_err(|_| CaptureError::PickerFailed)?,
+    };
+
+    // Click-through: la guía es informativa, nunca interactiva.
+    let _ = window.set_ignore_cursor_events(true);
+
+    let listo = window
+        .set_position(PhysicalPosition::new(marco.x, marco.y))
+        .and_then(|()| window.set_size(PhysicalSize::new(marco.width, marco.height)))
+        .and_then(|()| window.show());
+
+    if listo.is_err() {
+        let _ = window.close();
+        return Err(CaptureError::PickerFailed);
+    }
+
+    Ok(())
+}
+
+/// Oculta la guía. Idempotente: si no existe, no pasa nada.
+///
+/// `async` por lo mismo que [`show_region_guide`]: cerrar una ventana también
+/// despacha al event loop.
+#[tauri::command]
+pub async fn hide_region_guide(app: AppHandle) -> Result<(), CaptureError> {
+    if let Some(window) = app.get_webview_window(GUIDE_LABEL) {
+        let _ = window.close();
+    }
+
+    Ok(())
+}
+
+/// Rectángulo de la ventana-guía: la región agrandada por el grosor del borde.
+///
+/// Se agranda hacia afuera para que el borde quede fuera de lo capturado. Si se
+/// dibujara encima, el marco cyan aparecería en el video.
+fn guide_frame(region: Region) -> DesktopBounds {
+    let grosor = GUIDE_BORDER.unsigned_abs() * 2;
+
+    DesktopBounds {
+        x: region.x - GUIDE_BORDER,
+        y: region.y - GUIDE_BORDER,
+        width: region.width + grosor,
+        height: region.height + grosor,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -227,5 +314,32 @@ mod tests {
     #[test]
     fn sin_monitores_no_hay_rectangulo() {
         assert_eq!(union_bounds(&[]), None);
+    }
+
+    #[test]
+    fn la_guia_rodea_la_region_sin_pisarla() {
+        // El borde va POR FUERA. Si se dibujara encima, el marco cyan saldría
+        // en el video grabado.
+        let marco = guide_frame(Region {
+            x: 100,
+            y: 50,
+            width: 800,
+            height: 600,
+        });
+
+        assert_eq!((marco.x, marco.y), (98, 48));
+        assert_eq!((marco.width, marco.height), (804, 604));
+    }
+
+    #[test]
+    fn la_guia_soporta_origen_negativo() {
+        let marco = guide_frame(Region {
+            x: -1920,
+            y: 0,
+            width: 640,
+            height: 480,
+        });
+
+        assert_eq!((marco.x, marco.y), (-1922, -2));
     }
 }

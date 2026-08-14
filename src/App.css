@@ -163,11 +163,49 @@ body {
   color: var(--text-dim);
 }
 
-.badges__path {
-  margin-left: auto;
+.folder {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+}
+
+.folder__path {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.folder__path:hover {
+  color: var(--accent);
+}
+
+.folder__change {
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
   color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.folder__change:hover {
+  color: var(--text-soft);
 }
 
 /* ---------------- acción principal ---------------- */

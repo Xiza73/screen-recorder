@@ -108,6 +108,13 @@ rojo, no se commitea: se reporta la falla.
 - Eventos: `use tauri::Emitter;` → `app.emit(...)` / `app.emit_to(...)`.
 - Permisos vía **capabilities** en `src-tauri/capabilities/*.json`. El
   `allowlist` de v1 no existe.
+- **Todo comando que cree, cierre o mueva una ventana va `async`.** Un
+  `#[tauri::command]` síncrono corre en el hilo principal; manipular ventanas
+  despacha al event loop, que es ese mismo hilo esperando que el comando
+  termine. Deadlock: el `build()` nunca vuelve, el hilo principal queda muerto
+  y desde ahí **no se procesa ningún comando más**. No tira error ni panic — la
+  promesa del frontend simplemente nunca resuelve, así que se ve como "no pasa
+  nada". Costó tres intentos de diagnóstico; la palabra `async` era el fix.
 - Config: raíz `"app"` (no `"tauri"`), `bundle` es top-level,
   `build.frontendDist` / `build.devUrl`.
 

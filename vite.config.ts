@@ -8,6 +8,14 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig({
   plugins: [react()],
 
+  build: {
+    rollupOptions: {
+      // guide.html es una página suelta, sin JS ni bundle compartido: solo
+      // dibuja el borde del área que se está grabando.
+      input: { main: "index.html", guide: "guide.html" },
+    },
+  },
+
   // Opciones para Tauri: solo aplican en `tauri dev` / `tauri build`.
   // 1. no tapar los errores de Rust
   clearScreen: false,

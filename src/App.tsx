@@ -3,14 +3,17 @@ import { RegionPicker } from "./features/region-picker/RegionPicker";
 import { formatDuration } from "./lib/format-duration";
 import { DEFAULT_FPS } from "./lib/ipc/recorder";
 import { type FfmpegState, useFfmpegStatus } from "./lib/ipc/use-ffmpeg-status";
+import { type OutputFolder, useOutputDir } from "./lib/ipc/use-output-dir";
 import { type Recorder, useRecorder } from "./lib/ipc/use-recorder";
 import { type RegionSelection, sameRegion, useRegionSelection } from "./lib/ipc/use-region";
 import { closeWindow, minimizeWindow } from "./lib/ipc/window";
+import { shortenPath } from "./lib/shorten-path";
 import { useElapsed } from "./lib/use-elapsed";
 
 export default function App() {
   const ffmpeg = useFfmpegStatus();
   const selection = useRegionSelection();
+  const folder = useOutputDir();
   const recorder = useRecorder(selection.region);
 
   const recording = recorder.state.status === "recording";
@@ -65,7 +68,12 @@ export default function App() {
 
       <main className="panel">
         {ffmpeg.status === "ready" ? (
-          <RecorderPanel recorder={recorder} selection={selection} elapsed={elapsed} />
+          <RecorderPanel
+            recorder={recorder}
+            selection={selection}
+            folder={folder}
+            elapsed={elapsed}
+          />
         ) : (
           <FfmpegNotice state={ffmpeg} />
         )}
@@ -77,10 +85,12 @@ export default function App() {
 function RecorderPanel({
   recorder,
   selection,
+  folder,
   elapsed,
 }: {
   recorder: Recorder;
   selection: RegionSelection;
+  folder: OutputFolder;
   elapsed: number;
 }) {
   const { state, start, stop } = recorder;
@@ -122,7 +132,28 @@ function RecorderPanel({
       <div className="badges">
         <span className="badge">mp4</span>
         <span className="badge">{DEFAULT_FPS}fps</span>
-        <span className="badges__path">~/videos/</span>
+      </div>
+
+      <div className="folder">
+        <button
+          type="button"
+          className="folder__path"
+          onClick={folder.reveal}
+          // La ruta completa vive en el tooltip: se acorta lo que se ve, no lo
+          // que se sabe.
+          title={folder.dir ?? undefined}
+          disabled={!folder.dir}
+        >
+          {folder.dir ? shortenPath(folder.dir) : "buscando carpeta…"}
+        </button>
+        <button
+          type="button"
+          className="folder__change"
+          onClick={folder.change}
+          disabled={recording}
+        >
+          cambiar
+        </button>
       </div>
 
       {recording ? (
@@ -135,6 +166,7 @@ function RecorderPanel({
         </button>
       )}
 
+      {selection.error && <p className="status status--warn">falló {selection.error}</p>}
       {state.status === "saved" && <p className="status">guardado · {state.file}</p>}
       {state.status === "error" && (
         <p className="status status--warn">no se pudo completar la grabación</p>

@@ -3,10 +3,26 @@ import {
   type DesktopBounds,
   enterRegionMode,
   exitRegionMode,
+  hideRegionGuide,
   listMonitors,
   type MonitorInfo,
   type Region,
+  showRegionGuide,
 } from "./region";
+
+/**
+ * Texto legible de un error que vino de Rust.
+ *
+ * Los errores tipados llegan como `{ kind: "..." }`. Tragarlos en silencio deja
+ * una UI que no reacciona y no dice por qué: peor que fallar con un mensaje.
+ */
+function describir(error: unknown): string {
+  if (typeof error === "object" && error !== null && "kind" in error) {
+    return String((error as { kind: unknown }).kind);
+  }
+
+  return error instanceof Error ? error.message : String(error);
+}
 
 export type RegionSelection = {
   /** Monitores detectados, en el orden que los reporta el sistema. */
@@ -17,6 +33,8 @@ export type RegionSelection = {
   custom: boolean;
   /** Límites del escritorio mientras el overlay está activo; `null` si no lo está. */
   picking: DesktopBounds | null;
+  /** Última falla, para mostrarla en vez de no hacer nada. */
+  error: string | null;
   pickMonitor: (monitor: MonitorInfo) => void;
   /** Convierte esta ventana en overlay de selección. */
   startPicking: () => Promise<void>;
@@ -33,6 +51,7 @@ export function useRegionSelection(): RegionSelection {
   const [region, setRegion] = useState<Region | null>(null);
   const [custom, setCustom] = useState(false);
   const [picking, setPicking] = useState<DesktopBounds | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   // Arranca en el monitor primario y no en el escritorio virtual completo:
   // con dos pantallas, "todo" son 3840x1080 y eso no lo quiere nadie.
@@ -57,11 +76,25 @@ export function useRegionSelection(): RegionSelection {
     };
   }, []);
 
+  // El marco solo tiene sentido para un área recortada: una pantalla entera no
+  // necesita que le dibujen el contorno. Y durante la selección estorba, porque
+  // el overlay ya dibuja el suyo.
+  useEffect(() => {
+    const mostrar = !picking && custom && region !== null;
+
+    const accion = mostrar ? showRegionGuide(region) : hideRegionGuide();
+
+    // Sin marco se puede grabar igual, así que no rompe la app. Pero se avisa:
+    // un marco que no aparece y nadie explica es un bug invisible.
+    void accion.catch((fallo) => setError(`guía: ${describir(fallo)}`));
+  }, [picking, custom, region]);
+
   return {
     monitors,
     region,
     custom,
     picking,
+    error,
 
     pickMonitor: (monitor) => {
       setRegion(toRegion(monitor));
@@ -69,17 +102,19 @@ export function useRegionSelection(): RegionSelection {
     },
 
     startPicking: async () => {
+      setError(null);
       try {
         setPicking(await enterRegionMode());
-      } catch {
+      } catch (fallo) {
         setPicking(null);
+        setError(`área: ${describir(fallo)}`);
       }
     },
 
     finishPicking: async (elegida) => {
       // Restaurar la ventana SIEMPRE, aunque el usuario haya cancelado: si esto
       // falla el panel queda del tamaño del escritorio, tapando todo.
-      await exitRegionMode().catch(() => {});
+      await exitRegionMode().catch((fallo) => setError(`restaurar: ${describir(fallo)}`));
       setPicking(null);
 
       if (elegida) {

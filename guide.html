@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Área de grabación</title>
+    <!--
+      Guía visual del área que se está grabando.
+
+      Deliberadamente SIN JavaScript y sin compartir el bundle de la app: es una
+      ventana que solo dibuja un borde. Menos piezas, menos cosas que fallen, y
+      nada que necesite una consola para diagnosticarse.
+
+      La ventana se posiciona un par de píxeles POR FUERA de la región, así el
+      borde no entra en la grabación.
+    -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: transparent;
+        overflow: hidden;
+      }
+
+      .frame {
+        position: fixed;
+        inset: 0;
+        box-sizing: border-box;
+        border: 2px solid #35d6e8;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="frame"></div>
+  </body>
+</html>

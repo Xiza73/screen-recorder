@@ -34,3 +34,18 @@ export function enterRegionMode(): Promise<DesktopBounds> {
 export function exitRegionMode(): Promise<void> {
   return invoke<void>("exit_region_mode");
 }
+
+/**
+ * Dibuja el marco del área a grabar, por fuera de la región.
+ *
+ * Es una ventana sin JavaScript (`guide.html`) y click-through: informa, nunca
+ * interactúa. Llamarla de nuevo la reubica en vez de abrir otra.
+ */
+export function showRegionGuide(region: Region): Promise<void> {
+  return invoke<void>("show_region_guide", { region });
+}
+
+/** Saca el marco. Idempotente. */
+export function hideRegionGuide(): Promise<void> {
+  return invoke<void>("hide_region_guide");
+}

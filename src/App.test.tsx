@@ -2,8 +2,15 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "./App";
 import { getFfmpegStatus } from "./lib/ipc/ffmpeg";
+import { chooseOutputDir, outputDir, revealOutputDir } from "./lib/ipc/output";
 import { startRecording, stopRecording } from "./lib/ipc/recorder";
-import { enterRegionMode, exitRegionMode, listMonitors } from "./lib/ipc/region";
+import {
+  enterRegionMode,
+  exitRegionMode,
+  hideRegionGuide,
+  listMonitors,
+  showRegionGuide,
+} from "./lib/ipc/region";
 import { closeWindow, minimizeWindow } from "./lib/ipc/window";
 
 vi.mock("./lib/ipc/ffmpeg", () => ({ getFfmpegStatus: vi.fn() }));
@@ -17,6 +24,13 @@ vi.mock("./lib/ipc/region", () => ({
   listMonitors: vi.fn(),
   enterRegionMode: vi.fn(),
   exitRegionMode: vi.fn(),
+  showRegionGuide: vi.fn(),
+  hideRegionGuide: vi.fn(),
+}));
+vi.mock("./lib/ipc/output", () => ({
+  outputDir: vi.fn(),
+  chooseOutputDir: vi.fn(),
+  revealOutputDir: vi.fn(),
 }));
 
 const PANTALLA_1 = { x: 0, y: 0, width: 1920, height: 1080, primary: true };
@@ -28,6 +42,11 @@ beforeEach(() => {
   vi.mocked(listMonitors).mockResolvedValue([PANTALLA_1, PANTALLA_2]);
   vi.mocked(enterRegionMode).mockResolvedValue(ESCRITORIO);
   vi.mocked(exitRegionMode).mockResolvedValue(undefined);
+  vi.mocked(showRegionGuide).mockResolvedValue(undefined);
+  vi.mocked(hideRegionGuide).mockResolvedValue(undefined);
+  vi.mocked(outputDir).mockResolvedValue("C:\\Users\\dan\\Videos");
+  vi.mocked(revealOutputDir).mockResolvedValue(undefined);
+  vi.mocked(chooseOutputDir).mockResolvedValue(null);
   vi.mocked(getFfmpegStatus).mockResolvedValue({ status: "ready", version: "8.1" });
 });
 
@@ -149,6 +168,68 @@ describe("elección de fuente", () => {
 
     // Sigue mostrando el panel, no un overlay roto.
     expect(await botonGrabar()).toBeInTheDocument();
+  });
+});
+
+describe("carpeta de salida", () => {
+  it("muestra la carpeta real, acortada, con la ruta completa en el tooltip", async () => {
+    // El badge decía `~/videos/` hardcodeado: no era la carpeta real.
+    render(<App />);
+
+    const boton = await screen.findByRole("button", { name: /Videos/ });
+    expect(boton).toHaveAttribute("title", "C:\\Users\\dan\\Videos");
+  });
+
+  it("abre la carpeta en el explorador", async () => {
+    const user = userEvent.setup();
+
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /Videos/ }));
+
+    expect(revealOutputDir).toHaveBeenCalledWith("C:\\Users\\dan\\Videos");
+  });
+
+  it("cambia la carpeta con el diálogo nativo", async () => {
+    vi.mocked(chooseOutputDir).mockResolvedValue("D:\\demos");
+    const user = userEvent.setup();
+
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /cambiar/i }));
+
+    expect(chooseOutputDir).toHaveBeenCalledOnce();
+    expect(await screen.findByRole("button", { name: /demos/ })).toBeInTheDocument();
+  });
+
+  it("cancelar el diálogo deja la carpeta como estaba", async () => {
+    vi.mocked(chooseOutputDir).mockResolvedValue(null);
+    const user = userEvent.setup();
+
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /cambiar/i }));
+
+    expect(await screen.findByRole("button", { name: /Videos/ })).toBeInTheDocument();
+  });
+});
+
+describe("guía del área", () => {
+  it("no dibuja marco para un monitor entero", async () => {
+    // Una pantalla completa no necesita que le marquen el contorno.
+    render(<App />);
+    await screen.findByText(/1920×1080 @ 0,0/);
+
+    expect(showRegionGuide).not.toHaveBeenCalled();
+    expect(hideRegionGuide).toHaveBeenCalled();
+  });
+
+  it("no deja el marco puesto mientras se elige el área", async () => {
+    // Durante la selección estorba: el overlay ya dibuja su propio rectángulo.
+    const user = userEvent.setup();
+
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /^área$/i }));
+    await screen.findByText(/arrastrá para elegir/i);
+
+    expect(showRegionGuide).not.toHaveBeenCalled();
   });
 });
 
