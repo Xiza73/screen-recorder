@@ -201,6 +201,25 @@ Reglas duras (implementadas en `src-tauri/src/encode/`):
 No hay backend, ni base de datos, ni auth, ni pagos, ni telemetría. Si una tarea
 parece necesitar uno, **frená y preguntá** — probablemente esté fuera de alcance.
 
+## Referencias de diseño — `design/`
+
+Carpeta **no versionada y temporal**. El usuario deja ahí mockups en HTML e
+imágenes fuente (logo, íconos). Se borra cuando el diseño esté implementado.
+
+Cómo se usa:
+
+| | |
+|---|---|
+| ✅ Tomar | Colores, tipografía, espaciado, tamaños, jerarquía visual, layout |
+| ✅ Tomar | Las imágenes, como fuente para logo e íconos de la app |
+| ❌ **No** copiar | Nombres de clases, estructura de componentes, funcionalidad |
+
+Es un **mockup, no una arquitectura**. El HTML de ahí muestra cómo se tiene que
+ver; cómo se construye lo mandan las convenciones de este archivo (React 19,
+container/presentational, `kebab-case.ts`, sin lógica en componentes de UI).
+
+Si `design/` no existe o está vacía, no pasa nada: seguí con el diseño actual.
+
 ## Reglas de trabajo con Claude
 
 ### Hacé

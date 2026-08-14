@@ -2,6 +2,10 @@
 CLAUDE.local.md
 .claude/settings.local.json
 
+# --- Referencias de diseño: material de trabajo, temporal ---
+# Mockups HTML e imágenes fuente. Se borra cuando el diseño esté implementado.
+design/
+
 # --- Secretos y claves de firma ---
 # La clave privada del updater NO entra al repo bajo ninguna circunstancia
 .env
