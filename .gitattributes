@@ -1,0 +1,12 @@
+# Normalizar line endings: este repo buildea en macOS, Windows y Linux.
+# Sin esto, un CRLF en un script rompe el build en Linux.
+* text=auto eol=lf
+
+# Binarios: no tocar
+*.png binary
+*.jpg binary
+*.ico binary
+*.icns binary
+*.mp4 binary
+*.webm binary
+*.sig binary

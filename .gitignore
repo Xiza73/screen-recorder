@@ -1,0 +1,46 @@
+# --- Claude Code: personal, nunca commitear ---
+CLAUDE.local.md
+.claude/settings.local.json
+
+# --- Secretos y claves de firma ---
+# La clave privada del updater NO entra al repo bajo ninguna circunstancia
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+src-tauri/*.key
+
+# --- Node / bun ---
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+bun.lockb.bak
+
+# --- Rust / Tauri ---
+src-tauri/target/
+src-tauri/gen/
+
+# --- Test / coverage ---
+coverage/
+.vitest/
+
+# --- Artefactos de grabación (no versionar videos de prueba) ---
+recordings/
+*.mp4
+*.webm
+*.mkv
+*.mov
+
+# --- SO / editores ---
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
