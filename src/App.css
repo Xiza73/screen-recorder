@@ -1,76 +1,259 @@
-:root {
-  color-scheme: light dark;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
 }
 
 body {
   margin: 0;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  -webkit-font-smoothing: antialiased;
+  /* Es chrome de aplicación, no un documento: no se selecciona texto. */
+  user-select: none;
+  cursor: default;
 }
 
 .app {
   display: flex;
   flex-direction: column;
+  height: 100vh;
+}
+
+/* ---------------- barra de título ---------------- */
+
+.titlebar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.titlebar__dots {
+  display: flex;
+  gap: 8px;
+}
+
+.titlebar__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--dot-off);
+}
+
+.titlebar__label {
+  flex: 1;
+  display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 100vh;
-  gap: 0.5rem;
-  text-align: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-dimmer);
 }
 
-.app h1 {
-  margin: 0;
-  font-size: 1.5rem;
+.titlebar__caret {
+  color: var(--accent);
+}
+
+.titlebar__actions {
+  display: flex;
+  gap: 2px;
+}
+
+.titlebar__button {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.titlebar__button:hover {
+  background: var(--border-subtle);
+  color: var(--text-soft);
+}
+
+.titlebar__button--close:hover {
+  background: var(--danger-wash);
+  color: var(--danger);
+}
+
+/* ---------------- cuerpo ---------------- */
+
+.panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+}
+
+.label {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+.preview {
+  flex: 1;
+  min-height: 130px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--stripes);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+.badges {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.badge {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+}
+
+.badges__path {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+/* ---------------- acción principal ---------------- */
+
+.action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 13px 0;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--accent);
+  background: var(--accent-wash);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
   font-weight: 600;
+  letter-spacing: 1px;
+  cursor: pointer;
 }
 
-.status {
-  margin: 0;
-  opacity: 0.6;
-  font-size: 0.9rem;
+.action:hover {
+  background: var(--accent-wash-strong);
 }
 
-.status--warn {
-  opacity: 1;
-  color: color-mix(in oklab, currentColor 55%, #c2410c);
+.action--stop {
+  border-color: var(--danger);
+  background: var(--danger-wash);
+  color: var(--danger);
 }
 
+.action--stop:hover {
+  background: var(--danger-wash-strong);
+}
+
+.action__meta {
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--danger-dim);
+}
+
+/* ---------------- indicador de grabación ---------------- */
+
+/* No es decoración: una app que puede grabar sin señal visible es spyware.
+   Ver .claude/skills/security-review/SKILL.md § 7. */
 .recording {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
-  opacity: 1;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
   font-weight: 600;
+  color: var(--text);
 }
 
-.dot {
-  width: 0.6rem;
-  height: 0.6rem;
+.recording__dot {
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
-  background: #dc2626;
-  animation: pulse 1.4s ease-in-out infinite;
+  background: var(--danger);
+  animation: recpulse 1.4s infinite;
 }
 
-@keyframes pulse {
+@keyframes recpulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
   50% {
     opacity: 0.25;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .dot {
+  .recording__dot {
     animation: none;
   }
 }
 
-.hint {
-  display: inline-block;
-  margin-top: 0.4rem;
-  padding: 0.3rem 0.55rem;
-  border-radius: 0.35rem;
-  background: color-mix(in oklab, currentColor 10%, transparent);
-  font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
-  font-size: 0.85rem;
+/* ---------------- estados ---------------- */
+
+.notice {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-inset);
+  font-size: var(--text-md);
+  color: var(--text-soft);
+}
+
+.notice--warn {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.notice__hint {
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-soft);
   user-select: all;
+}
+
+.status {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+.status--warn {
+  color: var(--danger);
 }

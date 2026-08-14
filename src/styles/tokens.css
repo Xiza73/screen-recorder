@@ -1,0 +1,82 @@
+/*
+ * Sistema de diseño — extraído de design/Grabadora Dev.dc.html
+ *
+ * Las fuentes están bundleadas, no vienen de Google Fonts: la CSP es
+ * `default-src 'self'` y, sobre todo, una app que promete "todo local" no puede
+ * pegarle a un CDN externo en cada arranque.
+ */
+
+@font-face {
+  font-family: "Space Grotesk";
+  src: url("../assets/fonts/space-grotesk-latin.woff2") format("woff2");
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("../assets/fonts/jetbrains-mono-latin.woff2") format("woff2");
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* --- superficies, de más profunda a más elevada --- */
+  --bg-app: #07090c;
+  --bg-panel: #0c0f14;
+  --bg-inset: #0e1218;
+  --bg-raised: #10151c;
+  --bg-stripe: #131923;
+
+  /* --- bordes, de más sutil a más marcado --- */
+  --border-subtle: #161d27;
+  --border: #1c2430;
+  --border-strong: #26303e;
+
+  /* --- texto, de más brillante a más apagado --- */
+  --text: #dfe7ee;
+  --text-soft: #c3cdd8;
+  --text-dim: #8b96a4;
+  --text-dimmer: #6b7684;
+  --text-faint: #4d5866;
+  --dot-off: #2a3442;
+
+  /* --- acento y estados --- */
+  --accent: #35d6e8;
+  --accent-hover: #7ce4f2;
+  --accent-dim: #4d8f9a;
+  --accent-wash: rgb(53 214 232 / 0.08);
+  --accent-wash-strong: rgb(53 214 232 / 0.16);
+
+  --danger: #f4564e;
+  --danger-dim: #a06561;
+  --danger-wash: rgb(244 86 78 / 0.1);
+  --danger-wash-strong: rgb(244 86 78 / 0.22);
+
+  /* --- tipografía --- */
+  --font-ui: "Space Grotesk", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", monospace;
+
+  --text-2xs: 10px;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-lg: 14px;
+  --text-xl: 15px;
+
+  /* --- radios --- */
+  --radius-xs: 4px;
+  --radius-sm: 5px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --radius-full: 999px;
+
+  /* --- profundidad --- */
+  --shadow-panel: 0 24px 60px rgb(0 0 0 / 0.5);
+
+  /* --- superficie a rayas: placeholders de captura --- */
+  --stripes: repeating-linear-gradient(135deg, var(--bg-inset) 0 10px, var(--bg-raised) 10px 20px);
+}

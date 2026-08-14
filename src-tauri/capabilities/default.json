@@ -3,5 +3,10 @@
   "identifier": "default",
   "description": "Permisos de la ventana principal. Mínimo privilegio: se agregan de a uno, cuando una feature realmente los necesita.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-minimize",
+    "core:window:allow-close"
+  ]
 }

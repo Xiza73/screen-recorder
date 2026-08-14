@@ -144,7 +144,11 @@ screen-recorder/
 ├── src/                      # UI React
 │   ├── main.tsx              # entry point
 │   ├── App.tsx               # shell de la app
-│   └── App.test.tsx          # smoke test
+│   ├── styles/tokens.css     # sistema de diseño (variables CSS)
+│   ├── assets/fonts/         # woff2 bundleados, NO Google Fonts
+│   └── lib/
+│       ├── ipc/              # ÚNICO lugar que habla con Rust
+│       └── *.ts              # helpers puros (format-duration, use-elapsed)
 │
 └── src-tauri/
     ├── Cargo.toml            # crate: screen-recorder / lib: screen_recorder_lib
