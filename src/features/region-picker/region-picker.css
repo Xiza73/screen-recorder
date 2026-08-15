@@ -20,7 +20,37 @@
   border: 2px dashed var(--accent);
   border-radius: var(--radius-md);
   box-shadow: 0 0 0 100vmax rgb(7 9 12 / 0.55);
-  pointer-events: none;
+  cursor: move;
+}
+
+.picker__handle {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--accent);
+  border-radius: 3px;
+  background: var(--bg-panel);
+}
+
+.picker__handle--nw {
+  top: -8px;
+  left: -8px;
+  cursor: nwse-resize;
+}
+.picker__handle--ne {
+  top: -8px;
+  right: -8px;
+  cursor: nesw-resize;
+}
+.picker__handle--sw {
+  bottom: -8px;
+  left: -8px;
+  cursor: nesw-resize;
+}
+.picker__handle--se {
+  bottom: -8px;
+  right: -8px;
+  cursor: nwse-resize;
 }
 
 .picker__size {
@@ -33,6 +63,30 @@
   color: var(--accent);
   pointer-events: none;
   white-space: nowrap;
+}
+
+/* Panel de control flotando sobre el overlay: permite ajustar el marco y
+   arrancar a grabar sin salir del modo edición. */
+.picker__panel {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  width: 400px;
+  max-height: calc(100vh - 48px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-panel);
+  cursor: default;
+}
+
+/* La barra queda pegada arriba; el cuerpo reusa `.panel`, que ya trae su
+   padding y su gap. */
+.picker__panel > .titlebar {
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
 }
 
 .picker__hint {

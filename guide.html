@@ -4,14 +4,14 @@
     <meta charset="UTF-8" />
     <title>Área de grabación</title>
     <!--
-      Guía visual del área que se está grabando.
+      Guía del área que se va a grabar: atenúa todo el escritorio menos la
+      región elegida.
 
-      Deliberadamente SIN JavaScript y sin compartir el bundle de la app: es una
-      ventana que solo dibuja un borde. Menos piezas, menos cosas que fallen, y
-      nada que necesite una consola para diagnosticarse.
+      No usa el bundle de la app ni la API de Tauri: recibe todo por query
+      params y se dibuja sola. Sin IPC no necesita capability, y sin
+      dependencias no hay mucho que pueda romperse.
 
-      La ventana se posiciona un par de píxeles POR FUERA de la región, así el
-      borde no entra en la grabación.
+      La ventana cubre el escritorio virtual completo y es click-through.
     -->
     <style>
       html,
@@ -22,15 +22,50 @@
         overflow: hidden;
       }
 
-      .frame {
+      /*
+        `outline` y no `border`: se dibuja POR FUERA de la caja, así el marco
+        cyan no entra en la grabación. Con border quedaría 2px adentro y
+        aparecería en el video.
+
+        El box-shadow gigante atenúa todo lo de afuera sin necesidad de cuatro
+        divs recortando los bordes.
+      */
+      .hole {
         position: fixed;
-        inset: 0;
-        box-sizing: border-box;
-        border: 2px solid #35d6e8;
+        outline: 2px solid #35d6e8;
+        box-shadow: 0 0 0 100vmax rgb(7 9 12 / 0.45);
       }
     </style>
   </head>
   <body>
-    <div class="frame"></div>
+    <div class="hole" id="hole"></div>
+    <script>
+      const params = new URLSearchParams(location.search);
+      const num = (clave) => Number(params.get(clave) ?? 0);
+      const hole = document.getElementById("hole");
+
+      function pintar() {
+        const anchoFisico = num("dw");
+        if (anchoFisico <= 0 || window.innerWidth <= 0) return;
+
+        // El escalado sale de comparar el ancho físico contra el CSS: así queda
+        // bien con cualquier zoom del sistema, sin leer devicePixelRatio.
+        const escala = anchoFisico / window.innerWidth;
+
+        // La región llega en coordenadas del escritorio virtual, que puede
+        // arrancar en negativo. Se pasa a coordenadas de esta ventana.
+        hole.style.left = `${(num("x") - num("dx")) / escala}px`;
+        hole.style.top = `${(num("y") - num("dy")) / escala}px`;
+        hole.style.width = `${num("w") / escala}px`;
+        hole.style.height = `${num("h") / escala}px`;
+      }
+
+      // Se repinta en cada resize, y no solo al cargar: la ventana se crea con
+      // el tamaño por defecto y se agranda al escritorio DESPUÉS. Calcular una
+      // sola vez deja la escala tomada del tamaño equivocado, y el marco
+      // aparece en cualquier lado.
+      pintar();
+      window.addEventListener("resize", pintar);
+    </script>
   </body>
 </html>

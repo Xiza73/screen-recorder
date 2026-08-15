@@ -35,11 +35,15 @@ export type RegionSelection = {
   picking: DesktopBounds | null;
   /** Última falla, para mostrarla en vez de no hacer nada. */
   error: string | null;
-  pickMonitor: (monitor: MonitorInfo) => void;
+  pickMonitor: (monitor: MonitorInfo) => Promise<void>;
   /** Convierte esta ventana en overlay de selección. */
   startPicking: () => Promise<void>;
-  /** Cierra el overlay. Sin `region`, se cancela sin tocar la selección previa. */
-  finishPicking: (region?: Region) => Promise<void>;
+  /** Aplica una región nueva sin salir del overlay. */
+  updateRegion: (region: Region) => void;
+  /** Sale del overlay conservando lo elegido. */
+  stopPicking: () => Promise<void>;
+  /** Sale del overlay descartando los cambios. */
+  cancelPicking: () => Promise<void>;
 };
 
 export function sameRegion(a: Region | null, b: Region): boolean {
@@ -52,6 +56,7 @@ export function useRegionSelection(): RegionSelection {
   const [custom, setCustom] = useState(false);
   const [picking, setPicking] = useState<DesktopBounds | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [previa, setPrevia] = useState<{ region: Region | null; custom: boolean } | null>(null);
 
   // Arranca en el monitor primario y no en el escritorio virtual completo:
   // con dos pantallas, "todo" son 3840x1080 y eso no lo quiere nadie.
@@ -89,6 +94,17 @@ export function useRegionSelection(): RegionSelection {
     void accion.catch((fallo) => setError(`guía: ${describir(fallo)}`));
   }, [picking, custom, region]);
 
+  /**
+   * Devuelve la ventana a su tamaño de panel.
+   *
+   * Restaurar SIEMPRE: si falla, el panel queda del tamaño del escritorio
+   * tapando todo y sin controles.
+   */
+  async function salirDelOverlay() {
+    await exitRegionMode().catch((fallo) => setError(`restaurar: ${describir(fallo)}`));
+    setPicking(null);
+  }
+
   return {
     monitors,
     region,
@@ -96,13 +112,20 @@ export function useRegionSelection(): RegionSelection {
     picking,
     error,
 
-    pickMonitor: (monitor) => {
+    pickMonitor: async (monitor) => {
       setRegion(toRegion(monitor));
       setCustom(false);
+
+      // Elegir una pantalla entera sale del modo edición: si no, el overlay
+      // queda puesto y sin forma de volver al panel.
+      if (picking) await salirDelOverlay();
     },
 
     startPicking: async () => {
       setError(null);
+      // Se recuerda la selección previa para poder descartar los cambios.
+      setPrevia({ region, custom });
+
       try {
         setPicking(await enterRegionMode());
       } catch (fallo) {
@@ -111,16 +134,24 @@ export function useRegionSelection(): RegionSelection {
       }
     },
 
-    finishPicking: async (elegida) => {
-      // Restaurar la ventana SIEMPRE, aunque el usuario haya cancelado: si esto
-      // falla el panel queda del tamaño del escritorio, tapando todo.
-      await exitRegionMode().catch((fallo) => setError(`restaurar: ${describir(fallo)}`));
-      setPicking(null);
+    updateRegion: (elegida) => {
+      setRegion(elegida);
+      setCustom(true);
+    },
 
-      if (elegida) {
-        setRegion(elegida);
-        setCustom(true);
+    stopPicking: async () => {
+      await salirDelOverlay();
+      setPrevia(null);
+    },
+
+    cancelPicking: async () => {
+      await salirDelOverlay();
+
+      if (previa) {
+        setRegion(previa.region);
+        setCustom(previa.custom);
       }
+      setPrevia(null);
     },
   };
 }

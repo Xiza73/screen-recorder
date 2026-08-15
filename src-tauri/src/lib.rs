@@ -17,6 +17,7 @@ pub fn run() {
             encode::ffmpeg_status,
             capture::start_recording,
             capture::stop_recording,
+            capture::preview_frame,
             capture::picker::list_monitors,
             capture::picker::enter_region_mode,
             capture::picker::exit_region_mode,

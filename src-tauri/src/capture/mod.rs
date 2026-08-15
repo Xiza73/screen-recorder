@@ -61,6 +61,8 @@ pub enum CaptureError {
     StatePoisoned,
     #[error("no se pudo abrir el selector de región")]
     PickerFailed,
+    #[error("no se pudo generar la previsualización")]
+    PreviewFailed,
 }
 
 pub mod output;
@@ -158,22 +160,23 @@ fn input_target(_region: Option<Region>) -> String {
     INPUT_TARGET.to_owned()
 }
 
-/// Filtros que van **después** del `-i`. Solo macOS recorta por esta vía.
+/// Expresión de recorte para la cadena de filtros. Solo macOS recorta por acá.
 #[cfg(target_os = "macos")]
-fn crop_filter_args(region: Option<Region>) -> Vec<String> {
-    let Some(r) = region else {
-        return Vec::new();
-    };
-
-    vec![
-        "-vf".to_owned(),
-        format!("crop={}:{}:{}:{}", r.width, r.height, r.x, r.y),
-    ]
+fn crop_filter_expr(region: Option<Region>) -> Option<String> {
+    region.map(|r| format!("crop={}:{}:{}:{}", r.width, r.height, r.x, r.y))
 }
 
 #[cfg(not(target_os = "macos"))]
-fn crop_filter_args(_region: Option<Region>) -> Vec<String> {
-    Vec::new()
+fn crop_filter_expr(_region: Option<Region>) -> Option<String> {
+    None
+}
+
+/// Filtros que van **después** del `-i`.
+fn crop_filter_args(region: Option<Region>) -> Vec<String> {
+    match crop_filter_expr(region) {
+        Some(expr) => vec!["-vf".to_owned(), expr],
+        None => Vec::new(),
+    }
 }
 
 /// Argumentos de ffmpeg. Sin `region`, captura el escritorio completo.
@@ -302,6 +305,75 @@ pub fn start_recording(
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default())
+}
+
+/// Ancho de la previsualización, en píxeles. El alto sale de la proporción.
+const PREVIEW_WIDTH: u32 = 336;
+
+/// Argumentos para capturar **un** frame de la región, escalado y en PNG.
+fn preview_args(region: Option<Region>) -> Result<Vec<OsString>, CaptureError> {
+    let region = region.map(Region::normalized).transpose()?;
+
+    let mut parts = vec![
+        "-f".to_owned(),
+        INPUT_FORMAT.to_owned(),
+        "-framerate".to_owned(),
+        "1".to_owned(),
+    ];
+
+    parts.extend(crop_input_args(region));
+    parts.push("-i".to_owned());
+    parts.push(input_target(region));
+
+    // El recorte por filtro (macOS) se encadena con el escalado: son un solo
+    // `-vf`, y pasar dos se pisan entre sí en vez de sumarse.
+    let mut filtros: Vec<String> = crop_filter_expr(region).into_iter().collect();
+    // -2 mantiene la proporción y fuerza un alto par, que h264 exige.
+    filtros.push(format!("scale={PREVIEW_WIDTH}:-2"));
+
+    parts.extend([
+        "-frames:v".to_owned(),
+        "1".to_owned(),
+        "-vf".to_owned(),
+        filtros.join(","),
+        "-f".to_owned(),
+        "image2".to_owned(),
+        "-c:v".to_owned(),
+        "png".to_owned(),
+        "-".to_owned(),
+    ]);
+
+    Ok(parts.into_iter().map(OsString::from).collect())
+}
+
+/// Un frame de la región, como data URI PNG listo para un `<img>`.
+///
+/// No es un preview en vivo a propósito: sería un segundo encoder corriendo
+/// permanentemente para mostrar una miniatura. Se refresca al cambiar de fuente.
+#[tauri::command]
+pub async fn preview_frame(region: Option<Region>) -> Result<String, CaptureError> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+
+    let ffmpeg = crate::encode::resolve().map_err(|_| CaptureError::FfmpegUnavailable)?;
+    let args = preview_args(region)?;
+
+    // ponytail: bloquea el runtime async ~200 ms. Se llama al cambiar de fuente,
+    // no en un loop. Si alguna vez se llama seguido, mover a spawn_blocking.
+    let salida = Command::new(&ffmpeg)
+        .args(&args)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .map_err(|_| CaptureError::SpawnFailed)?;
+
+    if !salida.status.success() || salida.stdout.is_empty() {
+        return Err(CaptureError::PreviewFailed);
+    }
+
+    Ok(format!(
+        "data:image/png;base64,{}",
+        STANDARD.encode(&salida.stdout)
+    ))
 }
 
 /// Detiene la grabación en curso y cierra el archivo correctamente.

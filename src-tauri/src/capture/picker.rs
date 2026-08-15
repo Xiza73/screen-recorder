@@ -17,17 +17,25 @@ use std::sync::Mutex;
 
 use serde::Serialize;
 use tauri::{
-    AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder, Window,
+    AppHandle, LogicalSize, Manager, PhysicalPosition, PhysicalSize, WebviewUrl,
+    WebviewWindowBuilder, Window,
 };
 
 use super::{CaptureError, Region};
 
-/// Ventana que dibuja el borde del área a grabar.
+/// Ventana que atenúa el escritorio y marca el área a grabar.
 const GUIDE_LABEL: &str = "region-guide";
 
-/// Grosor del borde, en píxeles físicos. La ventana se corre esto hacia afuera
-/// para que el borde NO entre en la grabación.
-const GUIDE_BORDER: i32 = 2;
+/// Tamaño del panel en píxeles **lógicos**. Espeja `tauri.conf.json`.
+///
+/// Al volver del modo selección se restaura esta constante y **no** el tamaño
+/// que tenía antes de expandirse. Leerlo parecía lo natural, pero leer con una
+/// medida (`inner_size` / `outer_size`) y escribir con otra (`set_size`) corre
+/// la ventana unos píxeles por ciclo, y el desvío se acumula hasta que el
+/// contenido deja de entrar. Con una constante no hay lectura que pueda no
+/// coincidir con la escritura: el problema desaparece por construcción.
+const PANEL_WIDTH: f64 = 420.0;
+const PANEL_HEIGHT: f64 = 580.0;
 
 /// Rectángulo en píxeles físicos.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -53,9 +61,11 @@ pub struct MonitorInfo {
     pub primary: bool,
 }
 
-/// Geometría del panel, guardada para restaurarla al salir del modo selección.
+/// Posición del panel, guardada para restaurarla al salir del modo selección.
+///
+/// Solo la posición: el tamaño se restaura desde [`PANEL_WIDTH`]/[`PANEL_HEIGHT`].
 #[derive(Default)]
-pub struct PanelGeometry(Mutex<Option<(PhysicalPosition<i32>, PhysicalSize<u32>)>>);
+pub struct PanelGeometry(Mutex<Option<PhysicalPosition<i32>>>);
 
 /// Unión de todos los monitores: el escritorio virtual.
 ///
@@ -84,8 +94,8 @@ fn union_bounds(rects: &[(i32, i32, u32, u32)]) -> Option<DesktopBounds> {
     })
 }
 
-fn monitor_rects(window: &Window) -> Result<Vec<(i32, i32, u32, u32)>, CaptureError> {
-    Ok(window
+fn monitor_rects(app: &AppHandle) -> Result<Vec<(i32, i32, u32, u32)>, CaptureError> {
+    Ok(app
         .available_monitors()
         .map_err(|_| CaptureError::PickerFailed)?
         .iter()
@@ -95,6 +105,11 @@ fn monitor_rects(window: &Window) -> Result<Vec<(i32, i32, u32, u32)>, CaptureEr
             (p.x, p.y, s.width, s.height)
         })
         .collect())
+}
+
+/// Escritorio virtual completo, en píxeles físicos.
+fn desktop_bounds(app: &AppHandle) -> Result<DesktopBounds, CaptureError> {
+    union_bounds(&monitor_rects(app)?).ok_or(CaptureError::PickerFailed)
 }
 
 /// Monitores conectados.
@@ -134,17 +149,13 @@ pub fn enter_region_mode(
     window: Window,
     saved: tauri::State<'_, PanelGeometry>,
 ) -> Result<DesktopBounds, CaptureError> {
-    let bounds = union_bounds(&monitor_rects(&window)?).ok_or(CaptureError::PickerFailed)?;
+    let bounds = desktop_bounds(window.app_handle())?;
 
-    // Guardar ANTES de mover: sin esto no hay forma de volver al panel.
-    let previa = (
-        window
-            .outer_position()
-            .map_err(|_| CaptureError::PickerFailed)?,
-        window
-            .outer_size()
-            .map_err(|_| CaptureError::PickerFailed)?,
-    );
+    // Guardar la posición ANTES de mover: sin esto el panel no vuelve a su
+    // lugar. El tamaño no se guarda, se restaura desde la constante.
+    let previa = window
+        .outer_position()
+        .map_err(|_| CaptureError::PickerFailed)?;
     *saved.0.lock().map_err(|_| CaptureError::StatePoisoned)? = Some(previa);
 
     let listo = window
@@ -179,20 +190,25 @@ fn restore(window: &Window, saved: &tauri::State<'_, PanelGeometry>) -> Result<(
 
     let _ = window.set_always_on_top(false);
 
-    if let Some((position, size)) = previa {
-        // Tamaño antes que posición: al revés, con la ventana todavía enorme,
-        // Windows puede reubicarla sola para que entre en pantalla.
-        let _ = window.set_size(size);
+    // Tamaño antes que posición: al revés, con la ventana todavía del tamaño
+    // del escritorio, Windows puede reubicarla sola para que entre en pantalla.
+    let _ = window.set_size(LogicalSize::new(PANEL_WIDTH, PANEL_HEIGHT));
+
+    if let Some(position) = previa {
         let _ = window.set_position(position);
     }
 
     Ok(())
 }
 
-/// Muestra (o reubica) la guía visual alrededor de `region`.
+/// Muestra (o reubica) la guía del área a grabar.
 ///
-/// La ventana no tiene JavaScript: es `guide.html`, que solo pinta un borde.
-/// Es click-through, así que no puede robarle interacción a nada de abajo.
+/// La ventana cubre el **escritorio virtual completo** y atenúa todo menos la
+/// región. Es `guide.html`, que recibe las coordenadas por query params y se
+/// dibuja sola: sin IPC no necesita capability, y sin dependencias hay poco que
+/// pueda romperse.
+///
+/// Es click-through, así que no le roba interacción a nada de abajo.
 ///
 /// # Por qué es `async`
 ///
@@ -206,11 +222,16 @@ fn restore(window: &Window, saved: &tauri::State<'_, PanelGeometry>) -> Result<(
 /// No es cosmético: es la diferencia entre que funcione y que la app se congele.
 #[tauri::command]
 pub async fn show_region_guide(app: AppHandle, region: Region) -> Result<(), CaptureError> {
-    let marco = guide_frame(region);
+    let desktop = desktop_bounds(&app)?;
+    let url = guide_url(region, desktop);
 
     let window = match app.get_webview_window(GUIDE_LABEL) {
-        Some(existente) => existente,
-        None => WebviewWindowBuilder::new(&app, GUIDE_LABEL, WebviewUrl::App("guide.html".into()))
+        // Ya existe: solo se renavega con las coordenadas nuevas.
+        Some(existente) => {
+            let _ = existente.navigate(url.parse().map_err(|_| CaptureError::PickerFailed)?);
+            existente
+        }
+        None => WebviewWindowBuilder::new(&app, GUIDE_LABEL, WebviewUrl::App(url.into()))
             .title("Área de grabación")
             .decorations(false)
             .transparent(true)
@@ -227,8 +248,8 @@ pub async fn show_region_guide(app: AppHandle, region: Region) -> Result<(), Cap
     let _ = window.set_ignore_cursor_events(true);
 
     let listo = window
-        .set_position(PhysicalPosition::new(marco.x, marco.y))
-        .and_then(|()| window.set_size(PhysicalSize::new(marco.width, marco.height)))
+        .set_position(PhysicalPosition::new(desktop.x, desktop.y))
+        .and_then(|()| window.set_size(PhysicalSize::new(desktop.width, desktop.height)))
         .and_then(|()| window.show());
 
     if listo.is_err() {
@@ -236,7 +257,32 @@ pub async fn show_region_guide(app: AppHandle, region: Region) -> Result<(), Cap
         return Err(CaptureError::PickerFailed);
     }
 
+    // El panel quedaría DEBAJO del atenuado y se vería oscurecido también. Se
+    // sube al mismo plano: es el control de grabación, tiene sentido que flote
+    // mientras hay un área armada.
+    if let Some(panel) = app.get_webview_window("main") {
+        let _ = panel.set_always_on_top(true);
+    }
+
     Ok(())
+}
+
+/// URL de la guía con la región y el escritorio en píxeles físicos.
+///
+/// Viajan por query params en vez de por IPC: así `guide.html` no necesita la
+/// API de Tauri, ni capability, ni bundle compartido.
+fn guide_url(region: Region, desktop: DesktopBounds) -> String {
+    format!(
+        "guide.html?x={}&y={}&w={}&h={}&dx={}&dy={}&dw={}&dh={}",
+        region.x,
+        region.y,
+        region.width,
+        region.height,
+        desktop.x,
+        desktop.y,
+        desktop.width,
+        desktop.height
+    )
 }
 
 /// Oculta la guía. Idempotente: si no existe, no pasa nada.
@@ -245,26 +291,16 @@ pub async fn show_region_guide(app: AppHandle, region: Region) -> Result<(), Cap
 /// despacha al event loop.
 #[tauri::command]
 pub async fn hide_region_guide(app: AppHandle) -> Result<(), CaptureError> {
+    // El panel vuelve a comportarse como una ventana normal.
+    if let Some(panel) = app.get_webview_window("main") {
+        let _ = panel.set_always_on_top(false);
+    }
+
     if let Some(window) = app.get_webview_window(GUIDE_LABEL) {
         let _ = window.close();
     }
 
     Ok(())
-}
-
-/// Rectángulo de la ventana-guía: la región agrandada por el grosor del borde.
-///
-/// Se agranda hacia afuera para que el borde quede fuera de lo capturado. Si se
-/// dibujara encima, el marco cyan aparecería en el video.
-fn guide_frame(region: Region) -> DesktopBounds {
-    let grosor = GUIDE_BORDER.unsigned_abs() * 2;
-
-    DesktopBounds {
-        x: region.x - GUIDE_BORDER,
-        y: region.y - GUIDE_BORDER,
-        width: region.width + grosor,
-        height: region.height + grosor,
-    }
 }
 
 #[cfg(test)]
@@ -317,29 +353,49 @@ mod tests {
     }
 
     #[test]
-    fn la_guia_rodea_la_region_sin_pisarla() {
-        // El borde va POR FUERA. Si se dibujara encima, el marco cyan saldría
-        // en el video grabado.
-        let marco = guide_frame(Region {
-            x: 100,
-            y: 50,
-            width: 800,
-            height: 600,
-        });
+    fn la_url_de_la_guia_lleva_region_y_escritorio() {
+        // guide.html no habla IPC: todo lo que necesita viaja acá.
+        let url = guide_url(
+            Region {
+                x: 100,
+                y: 50,
+                width: 800,
+                height: 600,
+            },
+            DesktopBounds {
+                x: 0,
+                y: 0,
+                width: 3840,
+                height: 1080,
+            },
+        );
 
-        assert_eq!((marco.x, marco.y), (98, 48));
-        assert_eq!((marco.width, marco.height), (804, 604));
+        assert_eq!(
+            url,
+            "guide.html?x=100&y=50&w=800&h=600&dx=0&dy=0&dw=3840&dh=1080"
+        );
     }
 
     #[test]
-    fn la_guia_soporta_origen_negativo() {
-        let marco = guide_frame(Region {
-            x: -1920,
-            y: 0,
-            width: 640,
-            height: 480,
-        });
+    fn la_url_soporta_coordenadas_negativas() {
+        // El escritorio virtual del usuario arranca en x=-1920: si el signo se
+        // perdiera, el atenuado quedaría corrido una pantalla entera.
+        let url = guide_url(
+            Region {
+                x: -1325,
+                y: 291,
+                width: 766,
+                height: 500,
+            },
+            DesktopBounds {
+                x: -1920,
+                y: 0,
+                width: 3840,
+                height: 1080,
+            },
+        );
 
-        assert_eq!((marco.x, marco.y), (-1922, -2));
+        assert!(url.contains("x=-1325"), "{url}");
+        assert!(url.contains("dx=-1920"), "{url}");
     }
 }

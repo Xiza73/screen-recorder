@@ -4,6 +4,7 @@ import { formatDuration } from "./lib/format-duration";
 import { DEFAULT_FPS } from "./lib/ipc/recorder";
 import { type FfmpegState, useFfmpegStatus } from "./lib/ipc/use-ffmpeg-status";
 import { type OutputFolder, useOutputDir } from "./lib/ipc/use-output-dir";
+import { usePreview } from "./lib/ipc/use-preview";
 import { type Recorder, useRecorder } from "./lib/ipc/use-recorder";
 import { type RegionSelection, sameRegion, useRegionSelection } from "./lib/ipc/use-region";
 import { closeWindow, minimizeWindow } from "./lib/ipc/window";
@@ -19,66 +20,94 @@ export default function App() {
   const recording = recorder.state.status === "recording";
   const elapsed = useElapsed(recording);
 
-  // En modo selección esta misma ventana ES el overlay: no se dibuja el panel.
+  // Arrancar a grabar sale del modo edición: el marco queda fijo mientras se
+  // graba, que es lo único que no se puede seguir tocando.
+  async function iniciar() {
+    if (selection.picking) await selection.stopPicking();
+    await recorder.start();
+  }
+
+  const panel = (
+    <RecorderPanel
+      recorder={recorder}
+      selection={selection}
+      folder={folder}
+      elapsed={elapsed}
+      onStart={iniciar}
+    />
+  );
+
+  // La barra va también en el panel flotante: sin ella, cualquier problema para
+  // salir del overlay deja al usuario sin controles y sin salida.
+  const barra = <Titlebar recording={recording} elapsed={elapsed} />;
+
+  // En modo selección esta ventana ES el overlay, con el panel flotando encima.
   if (selection.picking) {
-    return <RegionPicker bounds={selection.picking} onDone={selection.finishPicking} />;
+    return (
+      <RegionPicker
+        // Con un área ya elegida se entra a editarla, no a empezar de cero.
+        initial={selection.custom ? (selection.region ?? undefined) : undefined}
+        onChange={selection.updateRegion}
+        onCancel={selection.cancelPicking}
+      >
+        {barra}
+        <div className="panel">{panel}</div>
+      </RegionPicker>
+    );
   }
 
   return (
     <div className="app">
-      <header className="titlebar" data-tauri-drag-region>
-        <div className="titlebar__dots" data-tauri-drag-region aria-hidden="true">
-          <span className="titlebar__dot" data-tauri-drag-region />
-          <span className="titlebar__dot" data-tauri-drag-region />
-          <span className="titlebar__dot" data-tauri-drag-region />
-        </div>
-
-        {recording ? (
-          // Indicador de grabación: requisito, no adorno. security-review § 7.
-          <p className="titlebar__label recording">
-            <span className="recording__dot" aria-hidden="true" />
-            Grabando {formatDuration(elapsed)}
-          </p>
-        ) : (
-          <span className="titlebar__label" data-tauri-drag-region>
-            screen recorder
-            <span className="titlebar__caret">_</span>
-          </span>
-        )}
-
-        <div className="titlebar__actions">
-          <button
-            type="button"
-            className="titlebar__button"
-            onClick={minimizeWindow}
-            aria-label="Minimizar"
-          >
-            –
-          </button>
-          <button
-            type="button"
-            className="titlebar__button titlebar__button--close"
-            onClick={closeWindow}
-            aria-label="Cerrar"
-          >
-            ✕
-          </button>
-        </div>
-      </header>
+      {barra}
 
       <main className="panel">
-        {ffmpeg.status === "ready" ? (
-          <RecorderPanel
-            recorder={recorder}
-            selection={selection}
-            folder={folder}
-            elapsed={elapsed}
-          />
-        ) : (
-          <FfmpegNotice state={ffmpeg} />
-        )}
+        {ffmpeg.status === "ready" ? panel : <FfmpegNotice state={ffmpeg} />}
       </main>
     </div>
+  );
+}
+
+function Titlebar({ recording, elapsed }: { recording: boolean; elapsed: number }) {
+  return (
+    <header className="titlebar" data-tauri-drag-region>
+      <div className="titlebar__dots" data-tauri-drag-region aria-hidden="true">
+        <span className="titlebar__dot" data-tauri-drag-region />
+        <span className="titlebar__dot" data-tauri-drag-region />
+        <span className="titlebar__dot" data-tauri-drag-region />
+      </div>
+
+      {recording ? (
+        // Indicador de grabación: requisito, no adorno. security-review § 7.
+        <p className="titlebar__label recording">
+          <span className="recording__dot" aria-hidden="true" />
+          Grabando {formatDuration(elapsed)}
+        </p>
+      ) : (
+        <span className="titlebar__label" data-tauri-drag-region>
+          screen recorder
+          <span className="titlebar__caret">_</span>
+        </span>
+      )}
+
+      <div className="titlebar__actions">
+        <button
+          type="button"
+          className="titlebar__button"
+          onClick={minimizeWindow}
+          aria-label="Minimizar"
+        >
+          –
+        </button>
+        <button
+          type="button"
+          className="titlebar__button titlebar__button--close"
+          onClick={closeWindow}
+          aria-label="Cerrar"
+        >
+          ✕
+        </button>
+      </div>
+    </header>
   );
 }
 
@@ -87,15 +116,21 @@ function RecorderPanel({
   selection,
   folder,
   elapsed,
+  onStart,
 }: {
   recorder: Recorder;
   selection: RegionSelection;
   folder: OutputFolder;
   elapsed: number;
+  onStart: () => Promise<void>;
 }) {
-  const { state, start, stop } = recorder;
+  const { state, stop } = recorder;
   const { monitors, region, custom, pickMonitor, startPicking } = selection;
   const recording = state.status === "recording";
+
+  // Sin miniatura mientras graba: pedirla lanzaría un segundo ffmpeg sobre la
+  // misma pantalla, compitiendo con el que está capturando.
+  const preview = usePreview(region, !recording);
 
   return (
     <>
@@ -123,10 +158,23 @@ function RecorderPanel({
         </button>
       </div>
 
-      <div className="preview">
+      <span className="preview__meta">
         {region
-          ? `[ ${region.width}×${region.height} @ ${region.x},${region.y} ]`
-          : "[ escritorio completo ]"}
+          ? `${region.width}×${region.height} @ ${region.x},${region.y}`
+          : "escritorio completo"}
+      </span>
+
+      <div
+        className={preview.loading ? "preview preview--loading" : "preview"}
+        role="img"
+        aria-busy={preview.loading}
+        aria-label="Vista previa de la captura"
+      >
+        {preview.frame ? (
+          <img className="preview__frame" src={preview.frame} alt="Vista previa de la captura" />
+        ) : (
+          !preview.loading && <span>sin vista previa</span>
+        )}
       </div>
 
       <div className="badges">
@@ -161,7 +209,7 @@ function RecorderPanel({
           ■ detener <span className="action__meta">{formatDuration(elapsed)}</span>
         </button>
       ) : (
-        <button type="button" className="action" onClick={start}>
+        <button type="button" className="action" onClick={onStart}>
           ▸ iniciar grabación
         </button>
       )}

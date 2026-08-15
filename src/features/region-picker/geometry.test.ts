@@ -1,4 +1,4 @@
-import { rectBetween, toPhysical } from "./geometry";
+import { anchorOf, moveRect, rectBetween, toCss, toPhysical } from "./geometry";
 
 describe("rectBetween", () => {
   it("arma el rectángulo arrastrando hacia abajo y a la derecha", () => {
@@ -76,5 +76,51 @@ describe("toPhysical", () => {
     for (const valor of Object.values(r)) {
       expect(Number.isInteger(valor)).toBe(true);
     }
+  });
+});
+
+describe("toCss", () => {
+  it("es la vuelta exacta de toPhysical", () => {
+    // Si no lo fuera, editar un área la movería sola al abrir el selector.
+    const origen = { x: -1920, y: -200 };
+    const original = { x: 100, y: 50, width: 800, height: 600 };
+
+    const fisico = toPhysical(original, origen, 1.5);
+    const vuelta = toCss(fisico, origen, 1.5);
+
+    expect(vuelta).toEqual(original);
+  });
+});
+
+describe("anchorOf", () => {
+  const rect = { x: 100, y: 50, width: 800, height: 600 };
+
+  it("devuelve la esquina opuesta a la que se arrastra", () => {
+    // Al tirar de una esquina, la de enfrente es la que NO se mueve.
+    expect(anchorOf(rect, "nw")).toEqual({ x: 900, y: 650 });
+    expect(anchorOf(rect, "se")).toEqual({ x: 100, y: 50 });
+    expect(anchorOf(rect, "ne")).toEqual({ x: 100, y: 650 });
+    expect(anchorOf(rect, "sw")).toEqual({ x: 900, y: 50 });
+  });
+
+  it("con su ancla y el cursor se reconstruye el rectángulo", () => {
+    // Arrastrar la esquina `se` hasta (500,300) deja el mismo origen y un
+    // tamaño nuevo: es todo lo que necesita el redimensionado.
+    const ancla = anchorOf(rect, "se");
+
+    expect(rectBetween(ancla, { x: 500, y: 300 })).toEqual({
+      x: 100,
+      y: 50,
+      width: 400,
+      height: 250,
+    });
+  });
+});
+
+describe("moveRect", () => {
+  it("desplaza sin cambiar el tamaño", () => {
+    const movido = moveRect({ x: 100, y: 50, width: 800, height: 600 }, { x: -30, y: 15 });
+
+    expect(movido).toEqual({ x: 70, y: 65, width: 800, height: 600 });
   });
 });
