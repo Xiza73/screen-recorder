@@ -1,13 +1,16 @@
 import { useEffect, useRef } from "react";
 import "./App.css";
+import { formatAccelerator } from "./lib/format-accelerator";
 import { formatDuration } from "./lib/format-duration";
 import { DEFAULT_FPS } from "./lib/ipc/recorder";
 import { onSelectionPlay, setPanelMode } from "./lib/ipc/region";
+import { onShortcutToggle } from "./lib/ipc/shortcuts";
 import { type FfmpegState, useFfmpegStatus } from "./lib/ipc/use-ffmpeg-status";
 import { type OutputFolder, useOutputDir } from "./lib/ipc/use-output-dir";
 import { usePreview } from "./lib/ipc/use-preview";
 import { type Recorder, useRecorder } from "./lib/ipc/use-recorder";
 import { type RegionSelection, sameRegion, useRegionSelection } from "./lib/ipc/use-region";
+import { useShortcut } from "./lib/ipc/use-shortcut";
 import { closeWindow, minimizeWindow } from "./lib/ipc/window";
 import { shortenPath } from "./lib/shorten-path";
 import { useElapsed } from "./lib/use-elapsed";
@@ -20,6 +23,7 @@ export default function App() {
   const selection = useRegionSelection(recording);
   const folder = useOutputDir();
   const elapsed = useElapsed(recording);
+  const atajo = useShortcut();
 
   async function iniciar() {
     selection.stopPicking();
@@ -57,10 +61,28 @@ export default function App() {
     };
   }, []);
 
+  // El atajo global alterna: Rust solo avisa que se apretó.
+  const alternarRef = useRef<() => void>(() => {});
+  alternarRef.current = () => void (recording ? detener() : iniciar());
+
+  useEffect(() => {
+    const suscripcion = onShortcutToggle(() => alternarRef.current());
+
+    return () => {
+      void suscripcion.then((unlisten) => unlisten());
+    };
+  }, []);
+
   // Mientras graba, el panel se encoge a una píldora: la app completa taparía
   // justo lo que se está grabando.
   if (recording) {
-    return <RecordingBar elapsed={elapsed} onStop={detener} />;
+    return (
+      <RecordingBar
+        elapsed={elapsed}
+        onStop={detener}
+        shortcut={atajo ? formatAccelerator(atajo.accelerator) : null}
+      />
+    );
   }
 
   return (
@@ -89,7 +111,15 @@ export default function App() {
  * Lo mínimo para saber que estás grabando y poder frenar. Arrastrable, porque
  * apoyada abajo al centro puede caer justo sobre lo que se está grabando.
  */
-function RecordingBar({ elapsed, onStop }: { elapsed: number; onStop: () => Promise<void> }) {
+function RecordingBar({
+  elapsed,
+  onStop,
+  shortcut,
+}: {
+  elapsed: number;
+  onStop: () => Promise<void>;
+  shortcut: string | null;
+}) {
   return (
     <div className="bar" data-tauri-drag-region>
       {/* Indicador de grabación: requisito, no adorno. security-review § 7. */}
@@ -100,6 +130,7 @@ function RecordingBar({ elapsed, onStop }: { elapsed: number; onStop: () => Prom
       <button type="button" className="bar__stop" onClick={onStop}>
         ■ detener
       </button>
+      {shortcut ? <span className="bar__hint">{shortcut}</span> : null}
     </div>
   );
 }
@@ -164,6 +195,7 @@ function RecorderPanel({
 
   // Sin miniatura mientras se elige: el overlay atenuado saldría en la foto.
   const preview = usePreview(region, !picking);
+  const shortcut = useShortcut();
 
   return (
     <>
@@ -232,7 +264,16 @@ function RecorderPanel({
 
       <button type="button" className="action" onClick={onStart}>
         ▸ iniciar grabación
+        {shortcut ? (
+          <span className="action__meta">{formatAccelerator(shortcut.accelerator)}</span>
+        ) : null}
       </button>
+
+      {shortcut && !shortcut.registered ? (
+        <p className="status status--warn">
+          otra app tiene tomado {formatAccelerator(shortcut.accelerator)}
+        </p>
+      ) : null}
 
       {selection.error && <p className="status status--warn">falló {selection.error}</p>}
       {state.status === "saved" && <p className="status">guardado · {state.file}</p>}

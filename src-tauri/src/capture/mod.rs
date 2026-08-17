@@ -266,7 +266,11 @@ impl Recorder {
         Ok(())
     }
 
-    fn stop(&self) -> Result<(), CaptureError> {
+    /// Detiene la grabación en curso, si la hay.
+    ///
+    /// Público para poder cerrarla también al salir de la app: si el proceso
+    /// muere con ffmpeg abierto, el archivo queda inreproducible.
+    pub fn stop(&self) -> Result<(), CaptureError> {
         let mut slot = self.0.lock().map_err(|_| CaptureError::StatePoisoned)?;
         let mut child = slot.take().ok_or(CaptureError::NotRecording)?;
 

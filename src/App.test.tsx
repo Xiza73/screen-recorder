@@ -15,6 +15,7 @@ import {
   type Region,
   setPanelMode,
 } from "./lib/ipc/region";
+import { onShortcutToggle, shortcutStatus } from "./lib/ipc/shortcuts";
 import { closeWindow, minimizeWindow } from "./lib/ipc/window";
 
 vi.mock("./lib/ipc/ffmpeg", () => ({ getFfmpegStatus: vi.fn() }));
@@ -28,6 +29,10 @@ vi.mock("./lib/ipc/output", () => ({
   outputDir: vi.fn(),
   chooseOutputDir: vi.fn(),
   revealOutputDir: vi.fn(),
+}));
+vi.mock("./lib/ipc/shortcuts", () => ({
+  shortcutStatus: vi.fn(),
+  onShortcutToggle: vi.fn(),
 }));
 vi.mock("./lib/ipc/region", () => ({
   listMonitors: vi.fn(),
@@ -53,11 +58,21 @@ const AREA = { x: 100, y: 50, width: 800, height: 600 };
 let publicarRegion: ((region: Region) => void) | undefined;
 let cerrarSeleccion: ((keep: boolean) => void) | undefined;
 let pedirPlay: (() => void) | undefined;
+let apretarAtajo: (() => void) | undefined;
 
 beforeEach(() => {
   publicarRegion = undefined;
   cerrarSeleccion = undefined;
   pedirPlay = undefined;
+  apretarAtajo = undefined;
+  vi.mocked(onShortcutToggle).mockImplementation((handler) => {
+    apretarAtajo = handler;
+    return Promise.resolve(() => {});
+  });
+  vi.mocked(shortcutStatus).mockResolvedValue({
+    accelerator: "CmdOrCtrl+Shift+R",
+    registered: true,
+  });
   vi.mocked(onSelectionPlay).mockImplementation((handler) => {
     pedirPlay = handler;
     return Promise.resolve(() => {});
@@ -334,6 +349,38 @@ describe("modo grabación", () => {
 
     expect(await screen.findByText(/no se pudo completar/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /detener/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("atajo global", () => {
+  it("alterna: arranca si está quieto y detiene si graba", async () => {
+    // Rust solo avisa que se apretó; qué significa lo decide el frontend, que
+    // es el único que conoce el estado.
+    vi.mocked(startRecording).mockResolvedValue("demo.mp4");
+    vi.mocked(stopRecording).mockResolvedValue(undefined);
+
+    render(<App />);
+    await botonGrabar();
+
+    apretarAtajo?.();
+    expect(await screen.findByRole("button", { name: /detener/i })).toBeInTheDocument();
+
+    apretarAtajo?.();
+    expect(await botonGrabar()).toBeInTheDocument();
+    expect(stopRecording).toHaveBeenCalledOnce();
+  });
+
+  it("avisa si otra app tiene tomado el atajo", async () => {
+    // Que falle no impide grabar con el botón, pero el usuario tiene que saber
+    // por qué su atajo no hace nada.
+    vi.mocked(shortcutStatus).mockResolvedValue({
+      accelerator: "CmdOrCtrl+Shift+R",
+      registered: false,
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText(/otra app tiene tomado/i)).toBeInTheDocument();
   });
 });
 

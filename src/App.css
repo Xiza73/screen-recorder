@@ -51,6 +51,12 @@ body {
   color: var(--text);
 }
 
+.bar__hint {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
 .bar__stop {
   padding: 8px 14px;
   border: 1px solid var(--danger);
