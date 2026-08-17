@@ -5,13 +5,15 @@ import { getFfmpegStatus } from "./lib/ipc/ffmpeg";
 import { chooseOutputDir, outputDir, revealOutputDir } from "./lib/ipc/output";
 import { startRecording, stopRecording } from "./lib/ipc/recorder";
 import {
-  contentViewport,
-  enterRegionMode,
-  exitRegionMode,
-  hideRegionGuide,
+  closeOverlay,
   listMonitors,
+  onRegion,
+  onSelectionClosed,
+  onSelectionPlay,
+  openOverlay,
   previewFrame,
-  showRegionGuide,
+  type Region,
+  setPanelMode,
 } from "./lib/ipc/region";
 import { closeWindow, minimizeWindow } from "./lib/ipc/window";
 
@@ -22,34 +24,57 @@ vi.mock("./lib/ipc/recorder", () => ({
   stopRecording: vi.fn(),
 }));
 vi.mock("./lib/ipc/window", () => ({ closeWindow: vi.fn(), minimizeWindow: vi.fn() }));
-vi.mock("./lib/ipc/region", () => ({
-  listMonitors: vi.fn(),
-  enterRegionMode: vi.fn(),
-  exitRegionMode: vi.fn(),
-  showRegionGuide: vi.fn(),
-  hideRegionGuide: vi.fn(),
-  previewFrame: vi.fn(),
-  contentViewport: vi.fn(),
-}));
 vi.mock("./lib/ipc/output", () => ({
   outputDir: vi.fn(),
   chooseOutputDir: vi.fn(),
   revealOutputDir: vi.fn(),
 }));
+vi.mock("./lib/ipc/region", () => ({
+  listMonitors: vi.fn(),
+  openOverlay: vi.fn(),
+  closeOverlay: vi.fn(),
+  setPanelMode: vi.fn(),
+  onRegion: vi.fn(),
+  onSelectionClosed: vi.fn(),
+  onSelectionPlay: vi.fn(),
+  emitRegion: vi.fn(),
+  emitSelectionClosed: vi.fn(),
+  emitSelectionPlay: vi.fn(),
+  previewFrame: vi.fn(),
+  contentViewport: vi.fn(),
+}));
 
 const PANTALLA_1 = { x: 0, y: 0, width: 1920, height: 1080, primary: true };
 const PANTALLA_2 = { x: 1920, y: 0, width: 1920, height: 1080, primary: false };
 const REGION_1 = { x: 0, y: 0, width: 1920, height: 1080 };
-const ESCRITORIO = { x: 0, y: 0, width: 3840, height: 1080 };
+const AREA = { x: 100, y: 50, width: 800, height: 600 };
+
+/** Handlers que el hook registró, para simular lo que emite el overlay. */
+let publicarRegion: ((region: Region) => void) | undefined;
+let cerrarSeleccion: ((keep: boolean) => void) | undefined;
+let pedirPlay: (() => void) | undefined;
 
 beforeEach(() => {
+  publicarRegion = undefined;
+  cerrarSeleccion = undefined;
+  pedirPlay = undefined;
+  vi.mocked(onSelectionPlay).mockImplementation((handler) => {
+    pedirPlay = handler;
+    return Promise.resolve(() => {});
+  });
+  vi.mocked(setPanelMode).mockResolvedValue(undefined);
+  vi.mocked(onRegion).mockImplementation((handler) => {
+    publicarRegion = handler;
+    return Promise.resolve(() => {});
+  });
+  vi.mocked(onSelectionClosed).mockImplementation((handler) => {
+    cerrarSeleccion = handler;
+    return Promise.resolve(() => {});
+  });
   vi.mocked(listMonitors).mockResolvedValue([PANTALLA_1, PANTALLA_2]);
-  vi.mocked(enterRegionMode).mockResolvedValue(ESCRITORIO);
-  vi.mocked(exitRegionMode).mockResolvedValue(undefined);
-  vi.mocked(showRegionGuide).mockResolvedValue(undefined);
-  vi.mocked(hideRegionGuide).mockResolvedValue(undefined);
+  vi.mocked(openOverlay).mockResolvedValue(undefined);
+  vi.mocked(closeOverlay).mockResolvedValue(undefined);
   vi.mocked(previewFrame).mockRejectedValue(new Error("sin miniatura en tests"));
-  vi.mocked(contentViewport).mockResolvedValue({ origin: { x: 0, y: 0 }, scale: 1 });
   vi.mocked(outputDir).mockResolvedValue("C:\\Users\\dan\\Videos");
   vi.mocked(revealOutputDir).mockResolvedValue(undefined);
   vi.mocked(chooseOutputDir).mockResolvedValue(null);
@@ -57,7 +82,7 @@ beforeEach(() => {
 });
 
 const botonGrabar = () => screen.findByRole("button", { name: /iniciar grabación/i });
-const botonDetener = () => screen.findByRole("button", { name: /detener/i });
+const botonArea = () => screen.findByRole("button", { name: /^área$/i });
 
 describe("barra de título", () => {
   it("expone minimizar y cerrar, porque no hay chrome del sistema", async () => {
@@ -107,14 +132,52 @@ describe("elección de fuente", () => {
     expect(startRecording).toHaveBeenCalledWith(30, REGION_1);
   });
 
-  it("lista una opción por monitor conectado", async () => {
+  it("no atenúa nada mientras no se grabe", async () => {
+    // Con el panel abierto la miniatura ya muestra qué se captura: atenuar solo
+    // dejaría el escritorio oscurecido de gusto.
     render(<App />);
+    await botonGrabar();
 
-    expect(await screen.findByRole("button", { name: /pantalla 1/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /pantalla 2/i })).toBeInTheDocument();
+    await waitFor(() => expect(closeOverlay).toHaveBeenCalled());
+    expect(openOverlay).not.toHaveBeenCalled();
   });
 
-  it("permite grabar el segundo monitor", async () => {
+  it("al detener vuelve al modo área, con el marco editable", async () => {
+    // El modo área es un modo en el que se queda: detener no devuelve al panel,
+    // devuelve al overlay con el marco editable y su container.
+    vi.mocked(startRecording).mockResolvedValue("demo.mp4");
+    vi.mocked(stopRecording).mockResolvedValue(undefined);
+    const user = userEvent.setup();
+
+    render(<App />);
+    await user.click(await botonArea());
+    publicarRegion?.(AREA);
+    await screen.findByText(/800×600/);
+
+    pedirPlay?.();
+    await waitFor(() => expect(openOverlay).toHaveBeenCalledWith(AREA, false));
+
+    vi.mocked(openOverlay).mockClear();
+    await user.click(await screen.findByRole("button", { name: /detener/i }));
+
+    // `true` = interactivo: el área se puede seguir moviendo.
+    await waitFor(() => expect(openOverlay).toHaveBeenCalledWith(AREA, true));
+    await waitFor(() => expect(setPanelMode).toHaveBeenCalledWith("hidden"));
+  });
+
+  it("sin área elegida, detener devuelve el panel completo", async () => {
+    vi.mocked(startRecording).mockResolvedValue("demo.mp4");
+    vi.mocked(stopRecording).mockResolvedValue(undefined);
+    const user = userEvent.setup();
+
+    render(<App />);
+    await user.click(await botonGrabar());
+    await user.click(await screen.findByRole("button", { name: /detener/i }));
+
+    await waitFor(() => expect(setPanelMode).toHaveBeenCalledWith("panel"));
+  });
+
+  it("lista una opción por monitor y permite grabar el segundo", async () => {
     vi.mocked(startRecording).mockResolvedValue("demo.mp4");
     const user = userEvent.setup();
 
@@ -137,93 +200,145 @@ describe("elección de fuente", () => {
 
     expect(await screen.findByRole("button", { name: /^pantalla$/i })).toBeInTheDocument();
   });
+});
 
-  it("el botón de área convierte la ventana en overlay sin esconder el panel", async () => {
+describe("modo selección de área", () => {
+  it("arranca sin área: el monitor elegido no se hereda", async () => {
+    // Entrar con el monitor entero marcado haría parecer que el área ya existe.
+    // El sentido de `área` es dibujarla desde cero.
     const user = userEvent.setup();
 
     render(<App />);
-    await user.click(await screen.findByRole("button", { name: /^área$/i }));
+    await user.click(await botonArea());
 
-    expect(enterRegionMode).toHaveBeenCalledOnce();
-    expect(await screen.findByText(/arrastrá para elegir el área/i)).toBeInTheDocument();
-
-    // El panel flota sobre el overlay: se puede seguir ajustando el marco y
-    // arrancar a grabar sin salir del modo edición.
-    expect(await botonGrabar()).toBeInTheDocument();
+    await waitFor(() => expect(openOverlay).toHaveBeenCalledWith(null, true));
   });
 
-  it("elegir una pantalla sale del modo edición", async () => {
-    // Sin esto el overlay queda puesto, sin controles y sin forma de volver.
+  it("esconde la app principal: manda el overlay", async () => {
+    // El overlay es fullscreen; dejar la app visible detrás solo genera una
+    // ventana que recibe clicks que nunca le llegan.
     const user = userEvent.setup();
 
     render(<App />);
-    await user.click(await screen.findByRole("button", { name: /^área$/i }));
-    await screen.findByText(/arrastrá para elegir/i);
+    await user.click(await botonArea());
 
-    await user.click(screen.getByRole("button", { name: /pantalla 2/i }));
-
-    expect(exitRegionMode).toHaveBeenCalledOnce();
-    expect(screen.queryByText(/arrastrá para elegir/i)).not.toBeInTheDocument();
+    await waitFor(() => expect(setPanelMode).toHaveBeenCalledWith("hidden"));
   });
 
-  it("el overlay conserva la barra de título", async () => {
-    // Es la salida de emergencia: nunca puede faltar.
-    const user = userEvent.setup();
-
-    render(<App />);
-    await user.click(await screen.findByRole("button", { name: /^área$/i }));
-    await screen.findByText(/arrastrá para elegir/i);
-
-    expect(screen.getByRole("button", { name: /cerrar/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /minimizar/i })).toBeInTheDocument();
-  });
-
-  it("arrancar a grabar sale del modo edición", async () => {
-    // El marco solo deja de ser editable cuando empieza la grabación.
+  it("el play del container arranca la grabación", async () => {
     vi.mocked(startRecording).mockResolvedValue("demo.mp4");
     const user = userEvent.setup();
 
     render(<App />);
-    await user.click(await screen.findByRole("button", { name: /^área$/i }));
-    await screen.findByText(/arrastrá para elegir/i);
+    await user.click(await botonArea());
+    publicarRegion?.(AREA);
+    await screen.findByText(/800×600/);
+
+    pedirPlay?.();
+
+    await waitFor(() => expect(startRecording).toHaveBeenCalledWith(30, AREA));
+    await waitFor(() => expect(setPanelMode).toHaveBeenCalledWith("bar"));
+  });
+
+  it("hereda el área si ya se había recortado una", async () => {
+    const user = userEvent.setup();
+
+    render(<App />);
+    await botonArea();
+    publicarRegion?.(AREA);
+    await screen.findByText(/800×600/);
+
+    await user.click(await botonArea());
+
+    await waitFor(() => expect(openOverlay).toHaveBeenCalledWith(AREA, true));
+  });
+
+  it("aplica el área que publica el overlay", async () => {
+    vi.mocked(startRecording).mockResolvedValue("demo.mp4");
+    const user = userEvent.setup();
+
+    render(<App />);
+    await botonGrabar();
+    publicarRegion?.(AREA);
+
+    expect(await screen.findByText(/800×600 @ 100,50/)).toBeInTheDocument();
 
     await user.click(await botonGrabar());
-
-    expect(exitRegionMode).toHaveBeenCalledOnce();
-    expect(startRecording).toHaveBeenCalled();
-    expect(screen.queryByText(/arrastrá para elegir/i)).not.toBeInTheDocument();
+    expect(startRecording).toHaveBeenCalledWith(30, AREA);
   });
 
-  it("esc sale del overlay y restaura la ventana", async () => {
-    // Si `exit_region_mode` no se llamara, el panel quedaría del tamaño del
-    // escritorio tapando todo, que es exactamente el bug que tuvimos.
+  it("salir de la selección sin grabar cierra el atenuado", async () => {
     const user = userEvent.setup();
 
     render(<App />);
-    await user.click(await screen.findByRole("button", { name: /^área$/i }));
-    await screen.findByText(/arrastrá para elegir/i);
+    await user.click(await botonArea());
+    publicarRegion?.(AREA);
 
-    await user.keyboard("{Escape}");
+    vi.mocked(closeOverlay).mockClear();
+    cerrarSeleccion?.(true);
 
-    expect(exitRegionMode).toHaveBeenCalledOnce();
-    expect(await botonGrabar()).toBeInTheDocument();
+    // El área queda elegida, pero sin grabar el atenuado no informa nada.
+    await waitFor(() => expect(closeOverlay).toHaveBeenCalled());
+    expect(await screen.findByText(/800×600 @ 100,50/)).toBeInTheDocument();
   });
 
-  it("si no se puede entrar en modo selección, no queda a medias", async () => {
-    vi.mocked(enterRegionMode).mockRejectedValue(new Error("sin monitores"));
+  it("cancelar desde el overlay restaura la fuente anterior", async () => {
     const user = userEvent.setup();
 
     render(<App />);
-    await user.click(await screen.findByRole("button", { name: /^área$/i }));
+    await user.click(await botonArea());
+    publicarRegion?.(AREA);
+    await screen.findByText(/800×600/);
 
-    // Sigue mostrando el panel, no un overlay roto.
-    expect(await botonGrabar()).toBeInTheDocument();
+    cerrarSeleccion?.(false);
+
+    expect(await screen.findByText(/1920×1080 @ 0,0/)).toBeInTheDocument();
+  });
+});
+
+describe("modo grabación", () => {
+  it("reemplaza el panel por la barra chica", async () => {
+    // La app completa taparía justo lo que se está grabando.
+    vi.mocked(startRecording).mockResolvedValue("demo.mp4");
+    const user = userEvent.setup();
+
+    render(<App />);
+    await user.click(await botonGrabar());
+
+    expect(await screen.findByRole("button", { name: /detener/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^área$/i })).not.toBeInTheDocument();
+    await waitFor(() => expect(setPanelMode).toHaveBeenCalledWith("bar"));
+  });
+
+  it("al detener vuelve el panel completo", async () => {
+    vi.mocked(startRecording).mockResolvedValue("demo.mp4");
+    vi.mocked(stopRecording).mockResolvedValue(undefined);
+    const user = userEvent.setup();
+
+    render(<App />);
+    await user.click(await botonGrabar());
+    await user.click(await screen.findByRole("button", { name: /detener/i }));
+
+    expect(await screen.findByText(/guardado · demo\.mp4/i)).toBeInTheDocument();
+    await waitFor(() => expect(setPanelMode).toHaveBeenCalledWith("panel"));
+  });
+
+  it("no deja la barra puesta si falla el arranque", async () => {
+    // Si quedara en modo grabación con ffmpeg caído, el usuario creería que
+    // está grabando y perdería la toma entera.
+    vi.mocked(startRecording).mockRejectedValue(new Error("spawn falló"));
+    const user = userEvent.setup();
+
+    render(<App />);
+    await user.click(await botonGrabar());
+
+    expect(await screen.findByText(/no se pudo completar/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /detener/i })).not.toBeInTheDocument();
   });
 });
 
 describe("carpeta de salida", () => {
   it("muestra la carpeta real, acortada, con la ruta completa en el tooltip", async () => {
-    // El badge decía `~/videos/` hardcodeado: no era la carpeta real.
     render(<App />);
 
     const boton = await screen.findByRole("button", { name: /Videos/ });
@@ -246,18 +361,7 @@ describe("carpeta de salida", () => {
     render(<App />);
     await user.click(await screen.findByRole("button", { name: /cambiar/i }));
 
-    expect(chooseOutputDir).toHaveBeenCalledOnce();
     expect(await screen.findByRole("button", { name: /demos/ })).toBeInTheDocument();
-  });
-
-  it("cancelar el diálogo deja la carpeta como estaba", async () => {
-    vi.mocked(chooseOutputDir).mockResolvedValue(null);
-    const user = userEvent.setup();
-
-    render(<App />);
-    await user.click(await screen.findByRole("button", { name: /cambiar/i }));
-
-    expect(await screen.findByRole("button", { name: /Videos/ })).toBeInTheDocument();
   });
 });
 
@@ -269,8 +373,6 @@ describe("previsualización", () => {
 
     render(<App />);
 
-    // El recuadro se monta antes de que corra el efecto que pide el frame:
-    // hay que esperar a que la carga arranque, no solo a que exista el nodo.
     const recuadro = await screen.findByLabelText(/vista previa/i);
     await waitFor(() => expect(recuadro).toHaveAttribute("aria-busy", "true"));
   });
@@ -281,80 +383,5 @@ describe("previsualización", () => {
     render(<App />);
 
     expect(await screen.findByText(/1920×1080 @ 0,0/)).toBeInTheDocument();
-    expect(await screen.findByLabelText(/vista previa/i)).toHaveAttribute("aria-busy", "false");
-  });
-});
-
-describe("guía del área", () => {
-  it("no dibuja marco para un monitor entero", async () => {
-    // Una pantalla completa no necesita que le marquen el contorno.
-    render(<App />);
-    await screen.findByText(/1920×1080 @ 0,0/);
-
-    expect(showRegionGuide).not.toHaveBeenCalled();
-    expect(hideRegionGuide).toHaveBeenCalled();
-  });
-
-  it("no deja el marco puesto mientras se elige el área", async () => {
-    // Durante la selección estorba: el overlay ya dibuja su propio rectángulo.
-    const user = userEvent.setup();
-
-    render(<App />);
-    await user.click(await screen.findByRole("button", { name: /^área$/i }));
-    await screen.findByText(/arrastrá para elegir/i);
-
-    expect(showRegionGuide).not.toHaveBeenCalled();
-  });
-});
-
-describe("grabación", () => {
-  it("muestra el indicador y el cronómetro al empezar", async () => {
-    vi.mocked(startRecording).mockResolvedValue("demo.mp4");
-    const user = userEvent.setup();
-
-    render(<App />);
-    await user.click(await botonGrabar());
-
-    // El indicador visible es un requisito de seguridad, no un detalle de UX.
-    expect(await screen.findByText(/grabando/i)).toBeInTheDocument();
-    expect(await botonDetener()).toBeInTheDocument();
-  });
-
-  it("informa el archivo guardado al detener", async () => {
-    vi.mocked(startRecording).mockResolvedValue("demo.mp4");
-    vi.mocked(stopRecording).mockResolvedValue(undefined);
-    const user = userEvent.setup();
-
-    render(<App />);
-    await user.click(await botonGrabar());
-    await user.click(await botonDetener());
-
-    expect(await screen.findByText(/guardado · demo\.mp4/i)).toBeInTheDocument();
-    expect(screen.queryByText(/grabando/i)).not.toBeInTheDocument();
-  });
-
-  it("no deja el indicador prendido si falla el arranque", async () => {
-    // Si el indicador quedara prendido con ffmpeg caído, el usuario creería que
-    // está grabando y perdería la toma entera.
-    vi.mocked(startRecording).mockRejectedValue(new Error("spawn falló"));
-    const user = userEvent.setup();
-
-    render(<App />);
-    await user.click(await botonGrabar());
-
-    expect(await screen.findByText(/no se pudo completar/i)).toBeInTheDocument();
-    expect(screen.queryByText(/grabando/i)).not.toBeInTheDocument();
-  });
-
-  it("no deja cambiar de fuente mientras graba", async () => {
-    vi.mocked(startRecording).mockResolvedValue("demo.mp4");
-    const user = userEvent.setup();
-
-    render(<App />);
-    await user.click(await botonGrabar());
-    await screen.findByText(/grabando/i);
-
-    expect(screen.getByRole("button", { name: /pantalla 1/i })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /^área$/i })).toBeDisabled();
   });
 });

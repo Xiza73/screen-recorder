@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "overlay",
+  "description": "Permisos del overlay de selección. Solo lo que necesita para medirse y avisar el área elegida: nada de grabar, ni de tocar la ventana del panel.",
+  "windows": ["selection"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-inner-position",
+    "core:window:allow-inner-size"
+  ]
+}

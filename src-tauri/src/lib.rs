@@ -19,10 +19,9 @@ pub fn run() {
             capture::stop_recording,
             capture::preview_frame,
             capture::picker::list_monitors,
-            capture::picker::enter_region_mode,
-            capture::picker::exit_region_mode,
-            capture::picker::show_region_guide,
-            capture::picker::hide_region_guide,
+            capture::picker::open_overlay,
+            capture::picker::close_overlay,
+            capture::picker::set_panel_mode,
             capture::output::output_dir,
             capture::output::set_output_dir
         ])

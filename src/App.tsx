@@ -1,7 +1,8 @@
+import { useEffect, useRef } from "react";
 import "./App.css";
-import { RegionPicker } from "./features/region-picker/RegionPicker";
 import { formatDuration } from "./lib/format-duration";
 import { DEFAULT_FPS } from "./lib/ipc/recorder";
+import { onSelectionPlay, setPanelMode } from "./lib/ipc/region";
 import { type FfmpegState, useFfmpegStatus } from "./lib/ipc/use-ffmpeg-status";
 import { type OutputFolder, useOutputDir } from "./lib/ipc/use-output-dir";
 import { usePreview } from "./lib/ipc/use-preview";
@@ -13,56 +14,92 @@ import { useElapsed } from "./lib/use-elapsed";
 
 export default function App() {
   const ffmpeg = useFfmpegStatus();
-  const selection = useRegionSelection();
-  const folder = useOutputDir();
-  const recorder = useRecorder(selection.region);
-
+  const recorder = useRecorder();
   const recording = recorder.state.status === "recording";
+
+  const selection = useRegionSelection(recording);
+  const folder = useOutputDir();
   const elapsed = useElapsed(recording);
 
-  // Arrancar a grabar sale del modo edición: el marco queda fijo mientras se
-  // graba, que es lo único que no se puede seguir tocando.
   async function iniciar() {
-    if (selection.picking) await selection.stopPicking();
-    await recorder.start();
+    selection.stopPicking();
+    await recorder.start(selection.region);
+    // La píldora reemplaza al container del overlay: misma posición, mismo
+    // aspecto, pero es una ventana de verdad y por eso recibe clicks aunque el
+    // overlay pase a ser click-through.
+    await setPanelMode("bar").catch(() => {});
   }
 
-  const panel = (
-    <RecorderPanel
-      recorder={recorder}
-      selection={selection}
-      folder={folder}
-      elapsed={elapsed}
-      onStart={iniciar}
-    />
-  );
+  async function detener() {
+    await recorder.stop();
 
-  // La barra va también en el panel flotante: sin ella, cualquier problema para
-  // salir del overlay deja al usuario sin controles y sin salida.
-  const barra = <Titlebar recording={recording} elapsed={elapsed} />;
+    // Con un área elegida se vuelve al MODO ÁREA, no al panel: el marco sigue
+    // editable y los controles siguen siendo el container. Se sale del modo
+    // recién con `esc` o el botón de salir.
+    if (selection.custom) {
+      selection.startPicking();
+      return;
+    }
 
-  // En modo selección esta ventana ES el overlay, con el panel flotando encima.
-  if (selection.picking) {
-    return (
-      <RegionPicker
-        // Con un área ya elegida se entra a editarla, no a empezar de cero.
-        initial={selection.custom ? (selection.region ?? undefined) : undefined}
-        onChange={selection.updateRegion}
-        onCancel={selection.cancelPicking}
-      >
-        {barra}
-        <div className="panel">{panel}</div>
-      </RegionPicker>
-    );
+    await setPanelMode("panel").catch(() => {});
+  }
+
+  // El container del overlay pide arrancar. Se guarda en un ref para que el
+  // listener se registre una sola vez y siempre vea el estado fresco.
+  const iniciarRef = useRef(iniciar);
+  iniciarRef.current = iniciar;
+
+  useEffect(() => {
+    const suscripcion = onSelectionPlay(() => void iniciarRef.current());
+
+    return () => {
+      void suscripcion.then((unlisten) => unlisten());
+    };
+  }, []);
+
+  // Mientras graba, el panel se encoge a una píldora: la app completa taparía
+  // justo lo que se está grabando.
+  if (recording) {
+    return <RecordingBar elapsed={elapsed} onStop={detener} />;
   }
 
   return (
     <div className="app">
-      {barra}
+      <Titlebar recording={false} elapsed={0} />
 
       <main className="panel">
-        {ffmpeg.status === "ready" ? panel : <FfmpegNotice state={ffmpeg} />}
+        {ffmpeg.status === "ready" ? (
+          <RecorderPanel
+            recorder={recorder}
+            selection={selection}
+            folder={folder}
+            onStart={iniciar}
+          />
+        ) : (
+          <FfmpegNotice state={ffmpeg} />
+        )}
       </main>
+    </div>
+  );
+}
+
+/**
+ * Barra de grabación: el panel encogido mientras graba.
+ *
+ * Lo mínimo para saber que estás grabando y poder frenar. Arrastrable, porque
+ * apoyada abajo al centro puede caer justo sobre lo que se está grabando.
+ */
+function RecordingBar({ elapsed, onStop }: { elapsed: number; onStop: () => Promise<void> }) {
+  return (
+    <div className="bar" data-tauri-drag-region>
+      {/* Indicador de grabación: requisito, no adorno. security-review § 7. */}
+      <span className="recording__dot" aria-hidden="true" />
+      <span className="bar__time" data-tauri-drag-region>
+        {formatDuration(elapsed)}
+      </span>
+      <button type="button" className="bar__stop" onClick={onStop}>
+        ■ detener
+      </button>
     </div>
   );
 }
@@ -115,22 +152,18 @@ function RecorderPanel({
   recorder,
   selection,
   folder,
-  elapsed,
   onStart,
 }: {
   recorder: Recorder;
   selection: RegionSelection;
   folder: OutputFolder;
-  elapsed: number;
   onStart: () => Promise<void>;
 }) {
-  const { state, stop } = recorder;
-  const { monitors, region, custom, pickMonitor, startPicking } = selection;
-  const recording = state.status === "recording";
+  const { state } = recorder;
+  const { monitors, region, custom, picking, pickMonitor, startPicking } = selection;
 
-  // Sin miniatura mientras graba: pedirla lanzaría un segundo ffmpeg sobre la
-  // misma pantalla, compitiendo con el que está capturando.
-  const preview = usePreview(region, !recording);
+  // Sin miniatura mientras se elige: el overlay atenuado saldría en la foto.
+  const preview = usePreview(region, !picking);
 
   return (
     <>
@@ -143,16 +176,14 @@ function RecorderPanel({
             type="button"
             className={!custom && sameRegion(region, monitor) ? "seg seg--on" : "seg"}
             onClick={() => pickMonitor(monitor)}
-            disabled={recording}
           >
             {monitors.length > 1 ? `pantalla ${i + 1}` : "pantalla"}
           </button>
         ))}
         <button
           type="button"
-          className={custom ? "seg seg--on" : "seg"}
+          className={custom || picking ? "seg seg--on" : "seg"}
           onClick={startPicking}
-          disabled={recording}
         >
           área
         </button>
@@ -194,25 +225,14 @@ function RecorderPanel({
         >
           {folder.dir ? shortenPath(folder.dir) : "buscando carpeta…"}
         </button>
-        <button
-          type="button"
-          className="folder__change"
-          onClick={folder.change}
-          disabled={recording}
-        >
+        <button type="button" className="folder__change" onClick={folder.change}>
           cambiar
         </button>
       </div>
 
-      {recording ? (
-        <button type="button" className="action action--stop" onClick={stop}>
-          ■ detener <span className="action__meta">{formatDuration(elapsed)}</span>
-        </button>
-      ) : (
-        <button type="button" className="action" onClick={onStart}>
-          ▸ iniciar grabación
-        </button>
-      )}
+      <button type="button" className="action" onClick={onStart}>
+        ▸ iniciar grabación
+      </button>
 
       {selection.error && <p className="status status--warn">falló {selection.error}</p>}
       {state.status === "saved" && <p className="status">guardado · {state.file}</p>}

@@ -15,12 +15,20 @@
   background: rgb(7 9 12 / 0.45);
 }
 
+/* Sin borde: el área se distingue por ser la única zona clara. Un marco
+   dibujado sobre el borde termina apareciendo en el video si el rectángulo
+   queda corrido aunque sea un píxel. El box-shadow gigante atenúa todo lo de
+   afuera sin necesidad de cuatro divs recortando. */
 .picker__rect {
   position: fixed;
-  border: 2px dashed var(--accent);
   border-radius: var(--radius-md);
   box-shadow: 0 0 0 100vmax rgb(7 9 12 / 0.55);
   cursor: move;
+}
+
+/* Mientras graba: solo el atenuado, sin nada que pueda entrar en la toma. */
+.picker__rect--quiet {
+  cursor: default;
 }
 
 .picker__handle {
@@ -65,28 +73,62 @@
   white-space: nowrap;
 }
 
-/* Panel de control flotando sobre el overlay: permite ajustar el marco y
-   arrancar a grabar sin salir del modo edición. */
-.picker__panel {
+/* Tarjeta de controles, arrastrable dentro del overlay. */
+.card {
   position: fixed;
-  top: 24px;
-  right: 24px;
-  width: 400px;
-  max-height: calc(100vh - 48px);
-  overflow: hidden;
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-xl);
-  background: var(--bg-panel);
+  border-radius: var(--radius-full);
+  background: rgb(12 15 20 / 0.95);
   box-shadow: var(--shadow-panel);
   cursor: default;
 }
 
-/* La barra queda pegada arriba; el cuerpo reusa `.panel`, que ya trae su
-   padding y su gap. */
-.picker__panel > .titlebar {
-  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+.card__grip {
+  color: var(--text-faint);
+  font-size: var(--text-lg);
+  cursor: move;
+  user-select: none;
+}
+
+.card {
+  width: 300px;
+  box-sizing: border-box;
+}
+
+.card__size {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-soft);
+}
+
+.card__ok,
+.card__cancel {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.card__ok {
+  border-color: var(--accent);
+  background: var(--accent-wash);
+  color: var(--accent);
+}
+
+.card__ok:disabled {
+  border-color: var(--border);
+  background: transparent;
+  color: var(--text-faint);
+  cursor: default;
 }
 
 .picker__hint {

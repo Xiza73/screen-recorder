@@ -28,6 +28,45 @@ body {
   overflow: hidden;
 }
 
+/* ---------------- barra de grabación ---------------- */
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 100vh;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-panel);
+  cursor: move;
+}
+
+.bar__time {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.bar__stop {
+  padding: 8px 14px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-full);
+  background: var(--danger-wash);
+  color: var(--danger);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.bar__stop:hover {
+  background: var(--danger-wash-strong);
+}
+
 /* ---------------- barra de título ---------------- */
 
 .titlebar {

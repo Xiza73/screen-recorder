@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 /** Espejo de `Region` en src-tauri/src/capture/mod.rs. Píxeles físicos. */
@@ -12,8 +13,23 @@ export type Region = {
 /** Espejo de `MonitorInfo` en picker.rs. Un monitor es una región más. */
 export type MonitorInfo = Region & { primary: boolean };
 
-/** Espejo de `DesktopBounds`: el escritorio virtual en píxeles físicos. */
-export type DesktopBounds = Region;
+const REGION_CHANGED = "region-changed";
+const SELECTION_CLOSED = "selection-closed";
+const SELECTION_PLAY = "selection-play";
+
+/** Qué muestra la ventana principal. Espejo de `PanelMode` en picker.rs. */
+export type PanelMode = "panel" | "bar" | "hidden";
+
+/**
+ * Cambia qué muestra la ventana principal.
+ *
+ * - `panel`: la app completa
+ * - `bar`: la píldora de controles, abajo al centro de la principal
+ * - `hidden`: escondida, porque manda el overlay con su container adentro
+ */
+export function setPanelMode(mode: PanelMode): Promise<void> {
+  return invoke<void>("set_panel_mode", { mode });
+}
 
 /** Monitores conectados. */
 export function listMonitors(): Promise<MonitorInfo[]> {
@@ -21,28 +37,78 @@ export function listMonitors(): Promise<MonitorInfo[]> {
 }
 
 /**
- * Expande esta ventana para cubrir el escritorio virtual y la pone al frente.
+ * Abre el overlay que atenúa todo menos el área.
  *
- * No se abre una segunda ventana: la principal se convierte en el overlay.
- * Devuelve los límites físicos, que el frontend necesita para convertir el
- * rectángulo dibujado en píxeles CSS.
+ * Es una ventana aparte y **estática**: el panel sigue siendo movible mientras
+ * elegís, y podés elegir el área que quedaba justo debajo suyo. Cuando el panel
+ * *era* el overlay, ninguna de las dos cosas se podía.
+ *
+ * `interactive` en `false` lo deja click-through: se ve el atenuado pero se
+ * puede seguir usando la máquina, que es lo que hace falta al grabar.
  */
-export function enterRegionMode(): Promise<DesktopBounds> {
-  return invoke<DesktopBounds>("enter_region_mode");
+export function openOverlay(region: Region | null, interactive: boolean): Promise<void> {
+  return invoke<void>("open_overlay", { region, interactive });
 }
 
-/** Devuelve la ventana a su geometría de panel. */
-export function exitRegionMode(): Promise<void> {
-  return invoke<void>("exit_region_mode");
+/** Cierra el overlay. Idempotente. */
+export function closeOverlay(): Promise<void> {
+  return invoke<void>("close_overlay");
 }
+
+/** Encoge el panel a la barra de grabación, abajo al centro de la principal. */
+export function enterRecordingMode(): Promise<void> {
+  return invoke<void>("enter_recording_mode");
+}
+
+/** Devuelve el panel a su tamaño y posición. */
+export function exitRecordingMode(): Promise<void> {
+  return invoke<void>("exit_recording_mode");
+}
+
+/** Publica el área elegida desde el overlay. */
+export function emitRegion(region: Region): Promise<void> {
+  return emit(REGION_CHANGED, region);
+}
+
+/** Escucha el área elegida, desde el panel. */
+export function onRegion(handler: (region: Region) => void): Promise<UnlistenFn> {
+  return listen<Region>(REGION_CHANGED, (event) => handler(event.payload));
+}
+
+/**
+ * El overlay avisa que terminó. `keep` en `false` descarta lo elegido.
+ *
+ * Los controles viven **dentro** del overlay: es fullscreen, así que cualquier
+ * botón en otra ventana quedaría tapado y sin recibir clicks.
+ */
+export function emitSelectionClosed(keep: boolean): Promise<void> {
+  return emit(SELECTION_CLOSED, keep);
+}
+
+/** Escucha el cierre del overlay, desde el panel. */
+export function onSelectionClosed(handler: (keep: boolean) => void): Promise<UnlistenFn> {
+  return listen<boolean>(SELECTION_CLOSED, (event) => handler(event.payload));
+}
+
+/** El container del overlay pide arrancar la grabación. */
+export function emitSelectionPlay(): Promise<void> {
+  return emit(SELECTION_PLAY, null);
+}
+
+/** Escucha el play del container, desde el panel. */
+export function onSelectionPlay(handler: () => void): Promise<UnlistenFn> {
+  return listen(SELECTION_PLAY, () => handler());
+}
+
+type Point = { x: number; y: number };
 
 /**
  * Origen y escala del **área de contenido** de esta ventana, en píxeles físicos.
  *
  * Se mide el rectángulo interno y no el externo: en Windows la ventana tiene un
- * marco invisible aunque `decorations` esté en false (medido: 436 de externo
- * para 420 de interno), así que el contenido arranca unos 8px adentro. Usar el
- * externo como origen corre la región elegida hacia arriba y a la izquierda.
+ * marco invisible aunque `decorations` esté en false, así que el contenido
+ * arranca unos píxeles adentro. Usar el externo como origen corre el área
+ * elegida hacia arriba y a la izquierda.
  *
  * Origen y escala salen del **mismo** rectángulo: así no pueden discrepar.
  */
@@ -56,18 +122,6 @@ export async function contentViewport(): Promise<{ origin: Point; scale: number 
   };
 }
 
-type Point = { x: number; y: number };
-
-/**
- * Dibuja el marco del área a grabar, por fuera de la región.
- *
- * Es una ventana sin JavaScript (`guide.html`) y click-through: informa, nunca
- * interactúa. Llamarla de nuevo la reubica en vez de abrir otra.
- */
-export function showRegionGuide(region: Region): Promise<void> {
-  return invoke<void>("show_region_guide", { region });
-}
-
 /**
  * Un frame de la región como data URI PNG, para la previsualización.
  *
@@ -76,9 +130,4 @@ export function showRegionGuide(region: Region): Promise<void> {
  */
 export function previewFrame(region: Region | null): Promise<string> {
   return invoke<string>("preview_frame", { region });
-}
-
-/** Saca el marco. Idempotente. */
-export function hideRegionGuide(): Promise<void> {
-  return invoke<void>("hide_region_guide");
 }

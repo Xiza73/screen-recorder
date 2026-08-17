@@ -10,15 +10,15 @@ export type RecorderState =
 
 export type Recorder = {
   state: RecorderState;
-  start: () => Promise<void>;
+  /** `region` en `null` graba el escritorio completo. */
+  start: (region: Region | null) => Promise<void>;
   stop: () => Promise<void>;
 };
 
-/** `region` en `null` graba el escritorio completo. */
-export function useRecorder(region: Region | null): Recorder {
+export function useRecorder(): Recorder {
   const [state, setState] = useState<RecorderState>({ status: "idle" });
 
-  async function start() {
+  async function start(region: Region | null) {
     try {
       const file = await startRecording(DEFAULT_FPS, region);
       setState({ status: "recording", file });

@@ -1,13 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
-  type DesktopBounds,
-  enterRegionMode,
-  exitRegionMode,
-  hideRegionGuide,
+  closeOverlay,
   listMonitors,
   type MonitorInfo,
+  onRegion,
+  onSelectionClosed,
+  openOverlay,
   type Region,
-  showRegionGuide,
+  setPanelMode,
 } from "./region";
 
 /**
@@ -25,38 +25,41 @@ function describir(error: unknown): string {
 }
 
 export type RegionSelection = {
-  /** Monitores detectados, en el orden que los reporta el sistema. */
   monitors: MonitorInfo[];
   /** Región a grabar. `null` solo si no se detectó ningún monitor. */
   region: Region | null;
   /** `true` si la región se recortó a mano y no es un monitor entero. */
   custom: boolean;
-  /** Límites del escritorio mientras el overlay está activo; `null` si no lo está. */
-  picking: DesktopBounds | null;
+  /** `true` mientras el overlay está en modo selección. */
+  picking: boolean;
   /** Última falla, para mostrarla en vez de no hacer nada. */
   error: string | null;
-  pickMonitor: (monitor: MonitorInfo) => Promise<void>;
-  /** Convierte esta ventana en overlay de selección. */
-  startPicking: () => Promise<void>;
-  /** Aplica una región nueva sin salir del overlay. */
-  updateRegion: (region: Region) => void;
-  /** Sale del overlay conservando lo elegido. */
-  stopPicking: () => Promise<void>;
-  /** Sale del overlay descartando los cambios. */
-  cancelPicking: () => Promise<void>;
+  pickMonitor: (monitor: MonitorInfo) => void;
+  startPicking: () => void;
+  stopPicking: () => void;
+  cancelPicking: () => void;
 };
 
 export function sameRegion(a: Region | null, b: Region): boolean {
   return a !== null && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
 }
 
-export function useRegionSelection(): RegionSelection {
+export function useRegionSelection(recording: boolean): RegionSelection {
   const [monitors, setMonitors] = useState<MonitorInfo[]>([]);
   const [region, setRegion] = useState<Region | null>(null);
   const [custom, setCustom] = useState(false);
-  const [picking, setPicking] = useState<DesktopBounds | null>(null);
+  const [picking, setPicking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previa, setPrevia] = useState<{ region: Region | null; custom: boolean } | null>(null);
+
+  // Estado actual sin generar dependencias: mientras se elige, el overlay
+  // maneja su propio rectángulo y volver a mandárselo lo recargaría a mitad
+  // del gesto.
+  const actual = useRef<{ region: Region | null; custom: boolean }>({ region, custom });
+  actual.current = { region, custom };
+
+  const previaRef = useRef<{ region: Region | null; custom: boolean } | null>(null);
+  previaRef.current = previa;
 
   // Arranca en el monitor primario y no en el escritorio virtual completo:
   // con dos pantallas, "todo" son 3840x1080 y eso no lo quiere nadie.
@@ -71,9 +74,8 @@ export function useRegionSelection(): RegionSelection {
         const inicial = detectados.find((m) => m.primary) ?? detectados[0];
         if (inicial) setRegion(toRegion(inicial));
       })
-      .catch(() => {
-        // Sin monitores detectados se graba el escritorio completo: es peor no
-        // poder grabar que grabar de más.
+      .catch((fallo) => {
+        if (!cancelled) setError(`monitores: ${describir(fallo)}`);
       });
 
     return () => {
@@ -81,29 +83,68 @@ export function useRegionSelection(): RegionSelection {
     };
   }, []);
 
-  // El marco solo tiene sentido para un área recortada: una pantalla entera no
-  // necesita que le dibujen el contorno. Y durante la selección estorba, porque
-  // el overlay ya dibuja el suyo.
+  // El overlay avisa cada área nueva por evento.
   useEffect(() => {
-    const mostrar = !picking && custom && region !== null;
+    const suscripcion = onRegion((elegida) => {
+      setRegion(elegida);
+      setCustom(true);
+    });
 
-    const accion = mostrar ? showRegionGuide(region) : hideRegionGuide();
+    return () => {
+      void suscripcion.then((unlisten) => unlisten());
+    };
+  }, []);
 
-    // Sin marco se puede grabar igual, así que no rompe la app. Pero se avisa:
-    // un marco que no aparece y nadie explica es un bug invisible.
-    void accion.catch((fallo) => setError(`guía: ${describir(fallo)}`));
-  }, [picking, custom, region]);
+  // Entrar a elegir abre el overlay UNA vez.
+  //
+  // Solo se hereda un área que ya se había recortado a mano. Entrar con el
+  // monitor entero marcado haría parecer que el área "ya existe": el sentido de
+  // `área` es dibujarla desde cero.
+  useEffect(() => {
+    if (!picking) return;
 
-  /**
-   * Devuelve la ventana a su tamaño de panel.
-   *
-   * Restaurar SIEMPRE: si falla, el panel queda del tamaño del escritorio
-   * tapando todo y sin controles.
-   */
-  async function salirDelOverlay() {
-    await exitRegionMode().catch((fallo) => setError(`restaurar: ${describir(fallo)}`));
-    setPicking(null);
-  }
+    const heredada = actual.current.custom ? actual.current.region : null;
+
+    // La app principal se esconde: manda el overlay, con su container adentro.
+    void openOverlay(heredada, true)
+      .then(() => setPanelMode("hidden"))
+      .catch((fallo) => setError(`área: ${describir(fallo)}`));
+  }, [picking]);
+
+  // El overlay avisa cuando termina: sus controles viven adentro suyo, porque
+  // es fullscreen y cualquier botón en otra ventana quedaría tapado.
+  useEffect(() => {
+    const suscripcion = onSelectionClosed((keep) => {
+      setPicking(false);
+      void setPanelMode("panel").catch(() => {});
+
+      if (!keep && previaRef.current) {
+        setRegion(previaRef.current.region);
+        setCustom(previaRef.current.custom);
+      }
+      setPrevia(null);
+    });
+
+    return () => {
+      void suscripcion.then((unlisten) => unlisten());
+    };
+  }, []);
+
+  // Fuera del modo selección, el atenuado solo se justifica MIENTRAS SE GRABA:
+  // ahí marca qué entra en la toma. Con el panel abierto no informa nada —la
+  // miniatura ya muestra qué se captura— y deja el escritorio oscurecido de
+  // gusto. Se cierra al terminar.
+  //
+  // Click-through siempre: el usuario tiene que poder seguir usando justo lo
+  // que está grabando.
+  useEffect(() => {
+    if (picking) return;
+
+    const debeAtenuar = recording && custom && region !== null;
+    const accion = debeAtenuar ? openOverlay(region, false) : closeOverlay();
+
+    void accion.catch((fallo) => setError(`atenuado: ${describir(fallo)}`));
+  }, [picking, recording, custom, region]);
 
   return {
     monitors,
@@ -112,41 +153,25 @@ export function useRegionSelection(): RegionSelection {
     picking,
     error,
 
-    pickMonitor: async (monitor) => {
+    pickMonitor: (monitor) => {
       setRegion(toRegion(monitor));
       setCustom(false);
-
-      // Elegir una pantalla entera sale del modo edición: si no, el overlay
-      // queda puesto y sin forma de volver al panel.
-      if (picking) await salirDelOverlay();
+      setPicking(false);
     },
 
-    startPicking: async () => {
+    startPicking: () => {
       setError(null);
-      // Se recuerda la selección previa para poder descartar los cambios.
       setPrevia({ region, custom });
-
-      try {
-        setPicking(await enterRegionMode());
-      } catch (fallo) {
-        setPicking(null);
-        setError(`área: ${describir(fallo)}`);
-      }
+      setPicking(true);
     },
 
-    updateRegion: (elegida) => {
-      setRegion(elegida);
-      setCustom(true);
-    },
-
-    stopPicking: async () => {
-      await salirDelOverlay();
+    stopPicking: () => {
+      setPicking(false);
       setPrevia(null);
     },
 
-    cancelPicking: async () => {
-      await salirDelOverlay();
-
+    cancelPicking: () => {
+      setPicking(false);
       if (previa) {
         setRegion(previa.region);
         setCustom(previa.custom);
